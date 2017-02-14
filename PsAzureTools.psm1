@@ -20,19 +20,19 @@ function Move-PsatNetworkInterface
 
     $nic = Get-AzureRmNetworkInterface | Where-Object {$_.Name -eq $NicName }
     if (-not $nic) {
-        Write-Error "$nicName NIC not found."
+        Write-Error "NetworkInterface '$nicName' not found."
         return
     }
 
     $vnet = Get-AzureRmVirtualNetwork | Where-Object {$_.Name -eq $VnetName}
     if (-not $vnet) {
-        Write-Error "$VnetName Vnet not found."
+        Write-Error "VirtualNetwork '$VnetName' not found."
         return
     }
 
     $subnet = $vnet.Subnets | Where-Object {$_.Name -eq $SubnetName}
     if (-not $subnet) {
-        Write-Error "$SubnetName Subnet not found."
+        Write-Error "Subnet '$SubnetName' Subnet not found."
         return
     }
 
@@ -42,7 +42,7 @@ function Move-PsatNetworkInterface
 
 
 ##########################################################################
-function Remove-PsatNetworkSecurityGroup {
+function Remove-PsatNetworkSecurityGroupById {
 
     [CmdletBinding()]
 
@@ -203,7 +203,7 @@ Function Remove-PsatVmComplete
                     Write-Verbose "okay to remove nsg"
                     if ($nic.NetworkSecurityGroup) {
                         Write-Verbose "attempting to remove nsg"
-                        $result = Remove-PsatNetworkSecurityGroup -nsgId $nic.NetworkSecurityGroup.Id
+                        $result = Remove-PsatNetworkSecurityGroupById -nsgId $nic.NetworkSecurityGroup.Id
                     }
                 }
 
