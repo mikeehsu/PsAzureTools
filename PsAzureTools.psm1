@@ -3,7 +3,7 @@ Import-Module 'AzureRm'
 
 ##########################################################################
 
-function Move-PsatNetworkInterface
+function Move-PsAzNetworkInterface
 {
     [CmdletBinding()]
 
@@ -42,7 +42,7 @@ function Move-PsatNetworkInterface
 
 
 ##########################################################################
-function Remove-PsatNetworkSecurityGroupById {
+function Remove-PsAzNetworkSecurityGroupById {
 
     [CmdletBinding()]
 
@@ -68,7 +68,7 @@ function Remove-PsatNetworkSecurityGroupById {
 
 
 ##########################################################################
-function Remove-PsatStorageBlobByUri {
+function Remove-PsAzStorageBlobByUri {
 
     [CmdletBinding()]
 
@@ -91,12 +91,12 @@ function Remove-PsatStorageBlobByUri {
 
     Write-Verbose "Removing blob: $blobName from resourceGroup: $resourceGroupName, storageAccount: $storageAccountName, container: $container"
     Set-AzureRmCurrentStorageAccount -ResourceGroupName "$resourceGroupName" -StorageAccountName "$storageAccountName"
-    Remove-PsatStorageBlob -Container $container -Blob $blobName
+    Remove-PsAzStorageBlob -Container $container -Blob $blobName
 }
 
 
 ##########################################################################
-Function Remove-PsatVmComplete
+Function Remove-PsAzVmComplete
 {
     [CmdletBinding()]
 
@@ -203,7 +203,7 @@ Function Remove-PsatVmComplete
                     Write-Verbose "okay to remove nsg"
                     if ($nic.NetworkSecurityGroup) {
                         Write-Verbose "attempting to remove nsg"
-                        $result = Remove-PsatNetworkSecurityGroupById -nsgId $nic.NetworkSecurityGroup.Id
+                        $result = Remove-PsAzNetworkSecurityGroupById -nsgId $nic.NetworkSecurityGroup.Id
                     }
                 }
 
@@ -224,7 +224,7 @@ Function Remove-PsatVmComplete
             $osDisk = $vm.StorageProfile.OsDisk.Vhd.Uri
             if ($osDisk) {
                 Write-Verbose "Removing OSDisk $osDisk"
-                $result = Remove-PsatStorageBlobByUri -Uri $osDisk
+                $result = Remove-PsAzStorageBlobByUri -Uri $osDisk
             }
         }
 
@@ -233,7 +233,7 @@ Function Remove-PsatVmComplete
         if (-not $KeepDataDisk) {
             foreach ($dataDisk in $dataDisks) {
                 Write-Verbose "Removing DataDisk $dataDisk.vhd.Uri"
-                $result = Remove-PsatStorageBlobByUri -Uri "$($dataDisk.vhd.Uri)"
+                $result = Remove-PsAzStorageBlobByUri -Uri "$($dataDisk.vhd.Uri)"
             }
         }
 
@@ -243,7 +243,7 @@ Function Remove-PsatVmComplete
             $resources = Get-AzureRmResource | Where-Object {$_.ResourceGroupName -eq "$ResourceGroupName" }
             if (-not $resources) {
                 Write-Verbose "Removing resource group $ResourceGroupName"
-                $result = Remove-PsatResourceGroup -Name $ResourceGroupName -ErrorAction Continue
+                $result = Remove-PsAzResourceGroup -Name $ResourceGroupName -ErrorAction Continue
             }
         }
 
@@ -260,7 +260,7 @@ Function Remove-PsatVmComplete
 
 ##########################################################################
 
-Function Update-PsatVm
+Function Update-PsAzVm
 {
     [CmdletBinding()]
 
