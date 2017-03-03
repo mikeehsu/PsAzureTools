@@ -5,15 +5,19 @@ This repository contains a collection of Powershell commands to help manage Azur
 
 Below is a list of commands available in the PsAzureTools module:
 
-- **Move-PsatNetworkInterface** - Move a NetworkInterface to a specific subnet
+- **Move-PsAzNetworkInterface** - Move a NetworkInterface to a specific subnet
 
-- **Remove-PsatNetworkSecurityGroupById** - Remove unused NetworkSecurityGroup by Id
+- **Remove-PsAzNetworkSecurityGroupById** - Remove unused NetworkSecurityGroup by Id
 
-- **Remove-PsatStorageBlobByUri** - Remove a blob from a StorageAccount using the URI
+- **Remove-PsAzStorageBlobByUri** - Remove a blob from a StorageAccount using the URI
 
-- **Remove-PsatVm** - Remove a VirtualMachine and all associated resources
+- **Remove-PsAzVm** - Remove a VirtualMachine and all associated resources
 
-- **Update-PsatVm** - update VirtualMachine settings, which may require deleting the machine and recreating it.
+- **Update-PsAzVm** - update VirtualMachine settings, which may require deleting the machine and recreating it.
+
+## Stand-Alone tools
+
+- **CreateWhitelistRouteTable.ps1** - Create a RouteTable from Azure Whitelist XML document.
 
 ## Contributing
 
