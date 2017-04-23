@@ -1,0 +1,9 @@
+VnetName,Location,VnetAddressPrefix,SubnetName,SubnetAddressPrefix
+Vnet-Test1,East US,10.1.0.0/16,GatewaySubnet,10.1.0.0/26
+Vnet-Test1,,,WebSubnet,10.1.1.0/24
+Vnet-Test1,,,DataSubnet,10.1.2.0/23
+Vnet-Test1,,,AppSubnet,10.1.4.0/22
+Vnet-Test2,East US,10.2.0.0/16,GatewaySubnet,10.2.0.0/26
+Vnet-Test2,,,WebSubnet,10.2.1.0/24
+Vnet-Test2,,,DataSubnet,10.2.2.0/23
+Vnet-Test2,,,AppSubnet,10.2.4.0/22
