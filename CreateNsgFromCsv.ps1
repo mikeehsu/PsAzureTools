@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
 
-Create or update a RouteTable with IP addressed necessary to reach services on the public internet
+Create Network Security Groups and associated rules from a CSV file
 .DESCRIPTION
 
-This Powershell command takes an XML file with a list of IP addresses to be whitelisted and creates a RouteTable for a specified region. Additionally, it can associate the RouteTable with the necessary subnets.
+This Powershell command takes a CSV file with a list of Network Security Groups and Rules configurations and executes a ARM deployment to create them.
 
-The list of Azure IP addresses can be found at: https://www.microsoft.com/en-us/download/details.aspx?id=41653
+Existing Network Security Groups listed in the CSV file will be altered to match the rules in the CSV file.
 
+Before executing this script, make sure you have logged into Azure (using Login-AzureRmAccount) and have the Subscription you wish to deploy to in context (using Select-AzureRmSubscription).
 .PARAMETER Filename
 
 Name of file containing Network Security Group configuration
@@ -17,6 +18,12 @@ Name of ResourceGroup to build the Network Security Group in
 .PARAMETER Location
 
 Location for the ResourceGroup
+.PARAMETER TemplateFile
+
+Destination for the ARM Template file that is created. This is an optional parameter. Provide this parameter if you want the created template saved to a specific destination.
+.PARAMETER Test
+
+Provide this parameter if you only want to test the created template, without deploying it.
 .EXAMPLE
 
 .\CreateNsgFromCsv.ps1 .\sample\SampleNsg.csv -ResourceGroupName 'RG-Test' -Location 'EastUS'
