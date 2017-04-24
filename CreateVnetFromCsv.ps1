@@ -37,7 +37,7 @@ Param(
     [string] $TemplateFile,
 
     [parameter(Mandatory=$False)]
-    [switch] $TemplateOnly
+    [switch] $Test
 )
 
 try {
@@ -52,7 +52,7 @@ Set-StrictMode -Version 2.0
 
 Write-Verbose "Inspecting $Filename"
 
-# make sure all VnetAddressPrefix & Location are consistent across the entire VnetName
+# make sure all VnetAddressPrefix & Location are consistent (or blank) across the entire VnetName
 $distinctVnets = $csvFile | 
     Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} | 
     Select-Object -Property VnetName, Location, VnetAddressPrefix -Unique | 
@@ -96,14 +96,30 @@ foreach ($vnet in $distinctVnets) {
 
 }
 
+# save template locally
 Save-PsArmTemplate -Template $template -TemplateFile $deploymentFile
 
-if ($TemplateOnly) {
+# execute a test deployment
+if ($Test) {
+    try {
+        Test-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateFile $deploymentFile -Verbose
+    } catch {
+        throw
+        return
+    }
+
+    Write-Output "Test completed successfully."
     return
 }
 
 # deploy the template
-New-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -Force
-New-AzureRmResourceGroupDeployment -Name $deploymentName -ResourceGroupName $ResourceGroupName -TemplateFile $deploymentFile -Verbose
+try {
+    New-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -Force
+    New-AzureRmResourceGroupDeployment -Name $deploymentName -ResourceGroupName $ResourceGroupName -TemplateFile $deploymentFile -Verbose
+} catch {
+    throw
+    return
+}
 
+Write-Output "Network Security Groups created successfully."
 return
