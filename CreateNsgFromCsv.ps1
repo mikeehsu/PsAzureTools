@@ -37,7 +37,7 @@ Param(
     [string] $TemplateFile,
 
     [parameter(Mandatory=$False)]
-    [switch] $TemplateOnly
+    [switch] $Test
 )
 
 try {
@@ -88,9 +88,6 @@ foreach ($nsg in $distinctNsgs) {
     # loop through all rules
     $rules = $csvFile | Where-Object {$_.NsgName -eq $nsg.NsgName} | Sort
     foreach ($rule in $rules) {
-
-        $rule
-
         $nsgResource = $nsgResource |
              Add-PsArmNetworkSecurityGroupRule -Name $rule.RuleName `
                 -Priority $rule.Priority `
@@ -107,14 +104,30 @@ foreach ($nsg in $distinctNsgs) {
 
 }
 
+# save the template locally
 Save-PsArmTemplate -Template $template -TemplateFile $deploymentFile
 
-if ($TemplateOnly) {
+# perform a test deployment
+if ($Test) {
+    try {
+        Test-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateFile $deploymentFile -Verbose
+    } catch {
+        throw
+        return
+    }
+
+    Write-Output "Test completed successfully."
     return
 }
 
 # deploy the template
-New-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -Force
-New-AzureRmResourceGroupDeployment -Name $deploymentName -ResourceGroupName $ResourceGroupName -TemplateFile $deploymentFile -Verbose
+try {
+    New-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -Force
+    New-AzureRmResourceGroupDeployment -Name $deploymentName -ResourceGroupName $ResourceGroupName -TemplateFile $deploymentFile -Verbose
+} catch {
+    throw
+    return
+}
 
+Write-Output "Virtual Networks created successfully."
 return
