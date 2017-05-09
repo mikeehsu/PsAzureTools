@@ -1,0 +1,3 @@
+RouteTableName,Location,RouteName,AddressPrefix,NextHopType,NextHopAddress
+Rt-Web,East US,Internet,0.0.0.0/0,Internet,
+Rt-App,East US,OnPrem,10.10.0.0/24,VirtualAppliance,172.168.0.1
