@@ -77,7 +77,7 @@ if ($routeTableCount.count -ne $($distinctRouteTables | Measure-Object).Count) {
 Write-Verbose "Initial inspection passed"
 
 # set deployment info
-$deploymentName = $resourceGroupName + $(get-date -f yyyyMMddHHMMss)
+$deploymentName = $resourceGroupName + $(get-date -f yyyyMMddHHmmss)
 $deploymentFile = $env:TEMP + '\'+ $deploymentName + '.json'
 if ($TemplateFile) {
     $deploymentFile = $TemplateFile
