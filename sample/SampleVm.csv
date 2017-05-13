@@ -1,0 +1,4 @@
+VmName,VnetName,SubnetName,OSType,VmSize,StorageAccountResourceGroupName,StorageAccountName,VhdImageName,osDiskName,DataDiskStorageAccountName,DataDiskSize,StaticIPAddress,CreatePublicIp,Publisher,Offer,Sku,AvailabilitySetName,NetworkSecurityGroupName
+TestVm1,Vnet-Test1,WebSubnet,Windows,Standard_A0,storagerg,testvms,,,,,,Y,MicrosoftWindowsServer,WindowsServer,2012-R2-Datacenter,,
+TestVm2,Vnet-Test1,AppSubnet,Windows,Standard_A0,storagerg,testvms,,,,,,N,MicrosoftWindowsServer,WindowsServer,2012-R2-Datacenter,,
+TestVm3,Vnet-Test1,AppSubnet,Windows,Standard_A0,storagerg,testvms,,,,,,N,MicrosoftWindowsServer,WindowsServer,2012-R2-Datacenter,,
