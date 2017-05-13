@@ -91,7 +91,7 @@ function Remove-PsAzStorageBlobByUri {
 
     Write-Verbose "Removing blob: $blobName from resourceGroup: $resourceGroupName, storageAccount: $storageAccountName, container: $container"
     Set-AzureRmCurrentStorageAccount -ResourceGroupName "$resourceGroupName" -StorageAccountName "$storageAccountName"
-    Remove-PsAzStorageBlob -Container $container -Blob $blobName
+    Remove-AzureStorageBlob -Container $container -Blob $blobName
 }
 
 
