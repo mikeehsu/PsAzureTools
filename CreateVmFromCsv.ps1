@@ -50,6 +50,18 @@ Param(
 Import-Module -Force PsArmResources
 Set-StrictMode -Version 2.0
 
+Try {
+    $result = Get-AzureRmContext -ErrorAction Stop
+    if (! $result.Environment) {
+        Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription context before proceeding."
+        exit
+    }
+
+} Catch {
+    Write-Error "Please login and set the proper subscription context before proceeding."
+    exit;
+}
+
 try {
     $csvFile = Import-Csv $Filename
 }
@@ -57,7 +69,6 @@ catch {
     throw
     return
 }
-
 
 # set deployment info
 $deploymentName = $resourceGroupName + $(get-date -f yyyyMMddHHmmss)
@@ -70,22 +81,103 @@ if ($TemplateFile) {
 # start building the template resources
 $template = New-PsArmTemplate
 
-# loop through all Vnets
+# loop through all availability sets
+$distinctAVsets = $csvFile |
+    Where-Object {$_.AvailabilitySetName -ne ''} |
+    Select-Object -Property AvailabilitySetName -Unique |
+    Sort-Object
+foreach ($avSet in $distinctAVsets) {
+    $resource = New-PsArmAvailabilitySet -Name $avSet.AvailabilitySetName -Location $Location
+
+    $template.resources += $resource
+}
+
+# load existing VMs
 $existingVms = Get-AzureRmVM
 
+# loop through all VMs
 foreach ($vmConfig in $csvFile) {
+
     if ($vmConfig.vmName -in $existingVms.Name) {
         Write-Verbose "$($vmConfig.vmName) already exists, skipped."
         continue
     }
 
+    # set all columns not provided to $null
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "StorageAccountResourceGroupName")) {
+        $vmConfig | Add-Member @{StorageAccountResourceGroupName = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "StorageAccountName")) {
+        $vmConfig | Add-Member @{StorageAccountName = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "VhdImageName")) {
+        $vmConfig | Add-Member @{VhdImageName = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "osDiskName")) {
+        $vmConfig | Add-Member @{osDiskName = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "OSDiskUri")) {
+        $vmConfig | Add-Member @{OSDiskUri = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "DataDiskStorageAccountName")) {
+        $vmConfig | Add-Member @{DataDiskStorageAccountName = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "DataDiskSize")) {
+        $vmConfig | Add-Member @{DataDiskSize = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "DataDiskUri")) {
+        $vmConfig | Add-Member @{DataDiskUri = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "StaticIPAddress")) {
+        $vmConfig | Add-Member @{StaticIPAddress = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "CreatePublicIp")) {
+        $vmConfig | Add-Member @{CreatePublicIp = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "Publisher")) {
+        $vmConfig | Add-Member @{Publisher = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "Offer")) {
+        $vmConfig | Add-Member @{Offer = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "Sku")) {
+        $vmConfig | Add-Member @{Sku = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "AvailabilitySetName")) {
+        $vmConfig | Add-Member @{AvailabilitySetName = $null}
+    }
+
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "NetworkSecurityGroupName")) {
+        $vmConfig | Add-Member @{NetworkSecurityGroupName = $null}
+    }
+
+
+    # set default values for blank columns
     $createPublicIP = $False
     if ($vmConfig.CreatePublicIp -eq 'Y') {
         $createPublicIP = $True
     }
 
-    if ($vmConfig.osDiskName -eq '') { $vmConfig.osDiskname = $null }
+    if ([string]::IsNullOrEmpty($vmConfig.osDiskName)) { $vmConfig.osDiskname = $null }
 
+    if ([string]::IsNullOrEmpty($vmConfig.DataDiskUri)) {
+        $vmConfig.DataDiskUri = $null
+    } else {
+        $vmConfig.DataDiskUri= $vmConfig.DataDiskUri.split('|')
+    }
 
     $vmResource = New-PsArmQuickVm -VmName $vmConfig.VmName `
             -VNetName $vmConfig.VnetName `
@@ -94,9 +186,11 @@ foreach ($vmConfig in $csvFile) {
             -vmSize  $vmConfig.VmSize `
             -StorageAccountResourceGroupName $vmConfig.StorageAccountResourceGroupName `
             -StorageAccountName $vmConfig.StorageAccountName `
-            -osDiskName $vmConfig.osDiskName `
+            -osDiskName $vmConfig.OsDiskName `
+            -OsDiskUri $vmConfig.OsDiskUri `
             -DataDiskStorageAccountName $vmConfig.DataDiskStorageAccountName `
             -DataDiskSize $vmConfig.DataDiskSize `
+            -DataDiskUri $vmConfig.DataDiskUri `
             -StaticIPAddress $vmConfig.StaticIPAddress `
             -CreatePublicIp $createPublicIP `
             -Publisher $vmConfig.Publisher `

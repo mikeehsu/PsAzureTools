@@ -1,0 +1,2 @@
+VmName,VnetName,SubnetName,OSType,VmSize,OSDiskUri,DataDiskUri,StaticIPAddress,CreatePublicIp,AvailabilitySetName
+TestVm2,Vnet-Test2,WebSubnet,Windows,Standard_A2,https://storageaccountname.blob.core.windows.net/vhds/testvm2-osdisk.vhd,https://storageaccountname.blob.core.windows.net/vhds/testvm2-datadisk1.vhd|https://storageaccountname.blob.core.windows.net/vhds/testvm2-datadisk2.vhd|https://storageaccountname.blob.core.windows.net/vhds/testvm2-datadisk3.vhd,10.2.1.10,N,democopyAVSet
