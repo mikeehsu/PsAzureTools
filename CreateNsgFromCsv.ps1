@@ -60,12 +60,12 @@ Set-StrictMode -Version 2.0
 Write-Verbose "Inspecting $Filename"
 
 # make sure all VnetAddressPrefix & Location are consistent (or blank) across the entire VnetName
-$distinctNsgs = $csvFile | 
-    Where-Object {$_.Location -ne '' } | 
-    Select-Object -Property NsgName, Location -Unique | 
-    Sort
-$nsgCount = $csvFile | 
-    Where-Object {$_.Location -ne ''} | 
+$distinctNsgs = $csvFile |
+    Where-Object {$_.Location -ne '' } |
+    Select-Object -Property NsgName, Location -Unique |
+    Sort-Object
+$nsgCount = $csvFile |
+    Where-Object {$_.Location -ne ''} |
     Select-Object -Property NsgName -Unique |
     Measure-Object
 if ($nsgCount.count -ne $($distinctNsgs | Measure-Object).Count) {
