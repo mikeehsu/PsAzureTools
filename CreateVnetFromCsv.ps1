@@ -60,12 +60,12 @@ Set-StrictMode -Version 2.0
 Write-Verbose "Inspecting $Filename"
 
 # make sure all VnetAddressPrefix & Location are consistent (or blank) across the entire VnetName
-$distinctVnets = $csvFile | 
-    Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} | 
-    Select-Object -Property VnetName, Location, VnetAddressPrefix -Unique | 
-    Sort
-$vnetCount = $csvFile | 
-    Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} | 
+$distinctVnets = $csvFile |
+    Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} |
+    Select-Object -Property VnetName, Location, VnetAddressPrefix -Unique |
+    Sort-Object
+$vnetCount = $csvFile |
+    Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} |
     Select-Object -Property VnetName -Unique |
     Measure-Object
 if ($vnetCount.count -ne $($distinctVnets | Measure-Object).Count) {
@@ -93,7 +93,7 @@ foreach ($vnet in $distinctVnets) {
     $vnetResource = New-PsArmVnet -Name $vnet.VnetName -AddressPrefixes $vnet.VnetAddressPrefix -Location $vnet.Location
 
     # loop through all subnets
-    $subnets = $csvFile | Where-Object {$_.VnetName -eq $vnet.VnetName} | Sort
+    $subnets = $csvFile | Where-Object {$_.VnetName -eq $vnet.VnetName} | Sort-Object
     foreach ($subnet in $subnets) {
         $vnetResource = $vnetResource |
              Add-PsArmVnetSubnet -Name $subnet.SubnetName -AddressPrefix $subnet.SubnetAddressPrefix
