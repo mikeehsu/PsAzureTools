@@ -104,63 +104,63 @@ foreach ($vmConfig in $csvFile) {
     }
 
     # set all columns not provided to $null
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "StorageAccountResourceGroupName")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "StorageAccountResourceGroupName")) {
         $vmConfig | Add-Member @{StorageAccountResourceGroupName = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "StorageAccountName")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "StorageAccountName")) {
         $vmConfig | Add-Member @{StorageAccountName = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "VhdImageName")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "VhdImageName")) {
         $vmConfig | Add-Member @{VhdImageName = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "osDiskName")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "osDiskName")) {
         $vmConfig | Add-Member @{osDiskName = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "OSDiskUri")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "OSDiskUri")) {
         $vmConfig | Add-Member @{OSDiskUri = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "DataDiskStorageAccountName")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "DataDiskStorageAccountName")) {
         $vmConfig | Add-Member @{DataDiskStorageAccountName = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "DataDiskSize")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "DataDiskSize")) {
         $vmConfig | Add-Member @{DataDiskSize = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "DataDiskUri")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "DataDiskUri")) {
         $vmConfig | Add-Member @{DataDiskUri = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "StaticIPAddress")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "StaticIPAddress")) {
         $vmConfig | Add-Member @{StaticIPAddress = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "CreatePublicIp")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "CreatePublicIp")) {
         $vmConfig | Add-Member @{CreatePublicIp = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "Publisher")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "Publisher")) {
         $vmConfig | Add-Member @{Publisher = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "Offer")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "Offer")) {
         $vmConfig | Add-Member @{Offer = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "Sku")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "Sku")) {
         $vmConfig | Add-Member @{Sku = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "AvailabilitySetName")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "AvailabilitySetName")) {
         $vmConfig | Add-Member @{AvailabilitySetName = $null}
     }
 
-    if (-not [bool] ($vmConfig.PSobject.Properties.name -match "NetworkSecurityGroupName")) {
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "NetworkSecurityGroupName")) {
         $vmConfig | Add-Member @{NetworkSecurityGroupName = $null}
     }
 
