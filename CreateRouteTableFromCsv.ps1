@@ -50,13 +50,7 @@ Param(
 Import-Module -Force PsArmResources
 Set-StrictMode -Version 2.0
 
-try {
-    $csvFile = Import-Csv $Filename
-} catch {
-    throw
-    return
-}
-
+# confirm user is logged into subscription
 try {
     $result = Get-AzureRmContext -ErrorAction Stop
     if (! $result.Environment) {
@@ -66,9 +60,16 @@ try {
 
 } catch {
     Write-Error "Please login and set the proper subscription context before proceeding."
-    exit;
+    exit
 }
 
+
+try {
+    $csvFile = Import-Csv $Filename
+} catch {
+    throw
+    return
+}
 
 Write-Verbose "Inspecting $Filename"
 

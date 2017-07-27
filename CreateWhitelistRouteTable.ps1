@@ -87,7 +87,7 @@ try {
 
 } catch {
     Write-Error "Please login and set the proper subscription context before proceeding."
-    exit;
+    exit
 }
 
 # verify parameters
