@@ -47,25 +47,38 @@ Param(
     [switch] $Test
 )
 
+Import-Module -Force PsArmResources
+Set-StrictMode -Version 2.0
+
 try {
     $csvFile = Import-Csv $Filename
-}
-catch {
+} catch {
     throw
     return
 }
 
-Set-StrictMode -Version 2.0
+try {
+    $result = Get-AzureRmContext -ErrorAction Stop
+    if (! $result.Environment) {
+        Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription context before proceeding."
+        exit
+    }
+
+} catch {
+    Write-Error "Please login and set the proper subscription context before proceeding."
+    exit;
+}
+
 
 Write-Verbose "Inspecting $Filename"
 
 # make sure all RouteTableName & Location are consistent (or blank) across the entire RouteTable
-$distinctRouteTables = $csvFile | 
-    Where-Object {$_.Location -ne '' } | 
-    Select-Object -Property RouteTableName, Location -Unique | 
+$distinctRouteTables = $csvFile |
+    Where-Object {$_.Location -ne '' } |
+    Select-Object -Property RouteTableName, Location -Unique |
     Sort
-$routeTableCount = $csvFile | 
-    Where-Object {$_.Location -ne ''} | 
+$routeTableCount = $csvFile |
+    Where-Object {$_.Location -ne ''} |
     Select-Object -Property RouteTableName -Unique |
     Measure-Object
 if ($routeTableCount.count -ne $($distinctRouteTables | Measure-Object).Count) {

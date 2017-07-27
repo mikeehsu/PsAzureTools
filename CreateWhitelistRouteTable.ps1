@@ -77,6 +77,19 @@ Param(
     [int] $Limit = 90
 )
 
+# confirm user is logged into subscription
+try {
+    $result = Get-AzureRmContext -ErrorAction Stop
+    if (! $result.Environment) {
+        Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription context before proceeding."
+        exit
+    }
+
+} catch {
+    Write-Error "Please login and set the proper subscription context before proceeding."
+    exit;
+}
+
 # verify parameters
 if ($SubnetName) {
     if (-not $VnetName)  {
