@@ -17,6 +17,14 @@ Below is a list of commands available in the PsAzureTools module:
 
 ## Stand-Alone tools
 
+- **CreateNsgFromCsv.ps1** - Create Network Security Groups from a CSV document.
+
+- **CreateRouteTableFromCsv.ps1** - Create Route Tables from a CSV document.
+
+- **CreateVmFromCsv.ps1** - Create Virtual Machines from a CSV document.
+
+- **CreateVnetFromCsv.ps1** - Create Virtual Networks from a CSV document.
+
 - **CreateWhitelistRouteTable.ps1** - Create a RouteTable from Azure Whitelist XML document.
 
 ## Contributing
