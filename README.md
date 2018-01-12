@@ -27,6 +27,16 @@ Below is a list of commands available in the PsAzureTools module:
 
 - **CreateWhitelistRouteTable.ps1** - Create a RouteTable from Azure Whitelist XML document.
 
+- **FindPublicAccessStorage.ps1** - List all storage containers that allow public access.
+
+- **FindResourceMissingTags.ps1** - List all resources that do not have specified tags associated.
+
+- **FindUnusedNetworkResources.ps1** - List all orphaned network resources.
+
+- **FindUnusedStorage.ps1** - List all orphaned storage accounts.
+
+- **MoveVmToNewResourceGroup.ps1** - Move virtual machines (with Managed Disk attached) to a different resource group.
+
 ## Contributing
 
 Mike Hsu
