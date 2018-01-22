@@ -70,6 +70,7 @@ if ($unusedNsgs.Count -eq 0) {
 }
 
 # find all unused Vnets
+$unusedVnets = @()
 $vnets = Get-AzureRmVirtualNetwork
 foreach ($vnet in $vnets) {
     $used = $false
