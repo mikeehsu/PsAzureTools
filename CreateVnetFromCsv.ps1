@@ -70,15 +70,49 @@ try {
     return
 }
 
+# preprocess file. fill in any blank spaces, carrying down previous line
+$previousLine = $null
+for ($i=0; $i -lt $csvFile.Length; $i++) {
+    $line = $csvFile[$i]
+
+    # set the previous line
+    if (-not $previousLine) {
+        if ([String]::IsNullOrWhiteSpace($line.VnetName)) {
+            continue
+        }
+        $previousLine = $line
+        continue
+    }
+
+    # check for any blank lines
+    if ([String]::IsNullOrWhiteSpace($line.VnetName)) {
+        $csvFile[$i].VnetName = $previousLine.VnetName
+    }
+
+    # check for any blank lines
+    if ([String]::IsNullOrWhiteSpace($line.Location)) {
+        $csvFile[$i].Location = $previousLine.Location
+    }
+
+    # check for any blank lines
+    if ([String]::IsNullOrWhiteSpace($line.VnetAddressPrefix)) {
+        $csvFile[$i].VnetAddressPrefix = $previousLine.VnetAddressPrefix
+    }
+
+    $previousLine = $line
+}
+
+
+
 Write-Verbose "Inspecting $Filename"
 
-# make sure all VnetAddressPrefix & Location are consistent (or blank) across the entire VnetName
+# make sure all VnetAddressPrefix & Location are consistent across the entire VnetName
 $distinctVnets = $csvFile |
-    Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} |
+    # Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} |
     Select-Object -Property VnetName, Location, VnetAddressPrefix -Unique |
     Sort-Object
 $vnetCount = $csvFile |
-    Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} |
+    # Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} |
     Select-Object -Property VnetName -Unique |
     Measure-Object
 if ($vnetCount.count -ne $($distinctVnets | Measure-Object).Count) {
@@ -141,5 +175,5 @@ try {
     return
 }
 
-Write-Output "Network Security Groups created successfully."
+Write-Output "Virtual Networks created successfully."
 return
