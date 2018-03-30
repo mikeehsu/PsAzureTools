@@ -171,6 +171,12 @@ foreach ($vmConfig in $csvFile) {
         $createPublicIP = $True
     }
 
+    if ([string]::IsNullOrEmpty($vmConfig.ManagedDisk) -or $vmConfig.ManagedDisk -ne 'Y') {
+        $ManagedDisk = $false
+    } else {
+        $ManagedDisk = $true
+    }
+
     if ([string]::IsNullOrEmpty($vmConfig.osDiskName)) { $vmConfig.osDiskname = $null }
 
     if ([string]::IsNullOrEmpty($vmConfig.DataDiskUri)) {
@@ -184,6 +190,7 @@ foreach ($vmConfig in $csvFile) {
             -SubnetName $vmConfig.SubnetName `
             -osType $vmConfig.OSType `
             -vmSize  $vmConfig.VmSize `
+            -ManagedDisk $ManagedDisk `
             -StorageAccountResourceGroupName $vmConfig.StorageAccountResourceGroupName `
             -StorageAccountName $vmConfig.StorageAccountName `
             -osDiskName $vmConfig.OsDiskName `
