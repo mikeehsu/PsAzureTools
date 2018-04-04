@@ -52,8 +52,14 @@ function MoveManagedDiskResourceGroup
         [string] $NewResourceGroupName
     )
 
+    Write-Verbose "Creating snapshot for disk $($ResourceGroupName)/$($DiskName)"
     $disk = Get-AzureRmDisk -ResourceGroupName $ResourceGroupName -DiskName $DiskName
     $snapshotName = $disk.Name + "_snapshot"
+
+    if ($disk.length -ne 1) {
+        Write-Error "Disk not found for $($ResourceGroupName)/$($DiskName)" -ErrorAction Stop
+        return
+    }
 
     $snapshot = New-AzureRmSnapshotConfig -SourceUri $disk.Id -CreateOption Copy -Location $disk.Location
     $snapshot = New-AzureRmSnapshot -Snapshot $snapshot -ResourceGroupName $oldResourceGroupName -SnapshotName $snapshotName
@@ -61,13 +67,26 @@ function MoveManagedDiskResourceGroup
     $diskConfig = New-AzureRmDiskConfig -AccountType $disk.AccountType -Location $snapshot.Location -SourceResourceId $snapshot.Id -CreateOption Copy
     $newDisk = New-AzureRmDisk -Disk $diskConfig -ResourceGroupName $newResourceGroupName -DiskName $disk.Name
 
-    $status = Remove-AzureRmSnapshot -ResourceGroupName $ResourceGroupName -SnapshotName $snapshotName -Force
+    $null = Remove-AzureRmSnapshot -ResourceGroupName $ResourceGroupName -SnapshotName $snapshotName -Force
 
     return $newDisk
 }
 
 ############################################################
 # main function
+
+# confirm user is logged into subscription
+try {
+    $result = Get-AzureRmContext -ErrorAction Stop
+    if (-not $result.Environment) {
+        Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription (Select-AzureRmSubscription) context before proceeding."
+        exit
+    }
+
+} catch {
+    Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription (Select-AzureRmSubscription) context before proceeding."
+    exit
+}
 
 $oldResourceGroupName = $ResourceGroupName
 $newResourceGroupName = $DestinationResourceGroupName
@@ -94,19 +113,19 @@ Write-Verbose "Getting info VmName $vmName"
 $oldVm = Get-AzureRMVm -ResourceGroupName $oldResourceGroupName -name $VmName -ErrorAction SilentlyContinue
 if (-not $oldVm)
 {
-    Write-Error "Unable to find $VmName in Resource Group $oldResourceGroupName"
+    Write-Error "Unable to find VM named $VmName in Resource Group $oldResourceGroupName"
     return
 }
 
 # create new resource group
 Write-Verbose "Creating ResourceGroup $newResourceGroupName"
-$newResourceGroup = New-AzureRmResourceGroup -Name $newResourceGroupName -Location $oldResourceGroup.Location -Force
+$null = New-AzureRmResourceGroup -Name $newResourceGroupName -Location $oldResourceGroup.Location -Force
 
 # create a OSDisk snapshot in old ResourgeGroup
-Write-Verbose "Creating OSDisk Snapshot for $($oldVm.StorageProfile.OSDisk.Name)"
 $newOsDisk = MoveManagedDiskResourceGroup -ResourceGroupName $oldResourceGroupName `
     -DiskName $oldVm.StorageProfile.OSDisk.Name `
-    -NewResourceGroupName $NewResourceGroupName
+    -NewResourceGroupName $NewResourceGroupName `
+    -ErrorAction Stop
 $newOsDisk
 
 # create DataDisk snapshots in old ResourceGroup
@@ -115,20 +134,20 @@ foreach ($dataDisk in $oldVm.StorageProfile.DataDisks) {
     Write-Verbose "Creating DataDisk Snapshot for $($dataDisk.Name)"
     $newDataDisks += MoveManagedDiskResourceGroup -ResourceGroupName $oldResourceGroupName `
         -DiskName $dataDisk.Name `
-        -NewResourceGroupName $NewResourceGroupName
+        -NewResourceGroupName $NewResourceGroupName `
+        -ErrorAction Stop
     $newDataDisks
 }
 
 # remove the old Vm
 Write-Verbose "Removing original VM $($oldVm.Name)"
-Remove-AzureRmVm -ResourceGroupName $oldVm.ResourceGroupName -Name $oldVm.Name -Force
-
+Remove-AzureRmVm -ResourceGroupName $oldVm.ResourceGroupName -Name $oldVm.Name -Force -ErrorAction Stop
 
 # Create the virtual machine with Managed OS disk
 Write-Verbose "Creating new VM"
 
 Write-Verbose "Setting OS Disk"
-$newVm = New-AzureRmVMConfig -VMName $oldVm.Name -VMSize $oldVm.HardwareProfile.VmSize
+$newVm = New-AzureRmVMConfig -VMName $oldVm.Name -VMSize $oldVm.HardwareProfile.VmSize -ErrorAction Stop
 if ($oldVm.OSProfile.WindowsConfiguration) {
     $newVm = Set-AzureRmVMOSDisk -VM $newVm -ManagedDiskId $newOsDisk.Id -CreateOption Attach -Windows
 } else {
@@ -139,7 +158,6 @@ if ($oldVm.OSProfile.WindowsConfiguration) {
 Write-Verbose "Adding Data Disks"
 $i = 0
 foreach ($newDataDisk in $newDataDisks) {
-    Write-Output "i=$i"
     $newDataDisk
     $newVm = Add-AzureRmVMDataDisk -VM $newVm -ManagedDiskId $newDataDisk.Id -CreateOption Attach -Lun $i
     $i = $i + 1
@@ -195,4 +213,6 @@ foreach ($interface in $oldVm.NetworkProfile.NetworkInterfaces) {
 }
 
 Write-Output "VM $VmName has been moved to $DestinationResourceGroupName"
-Write-Output "Please verfiy the new Virtual Machine and remove the original disks once the machine is confirmed. (Virtual networks and Storage Account associated with the original resource group were not moved as they can be shared by multiple resources. Please review these resources and move as necessary.)"
+Write-Output "- Please verify the diagnostic storage account assigned to the new VM to ensure the logs are written to the proper account."
+Write-Output "- Please verfiy the new Virtual Machine and remove the original disks once the machine is confirmed."
+Write-Output "- Review any Virtual networks and Storage Account associated with the original resource group. These resources were not moved as they can be shared by multiple resources. You may manually move these resourcesas necessary."
