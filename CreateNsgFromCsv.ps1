@@ -114,10 +114,10 @@ foreach ($nsg in $distinctNsgs) {
                 -Access $rule.Access `
                 -Direction $rule.Direction `
                 -Protocol $rule.Protocol `
-                -SourceAddressPrefix $rule.SourceAddressPrefix `
-                -SourcePortRange $rule.SourcePortRange `
-                -DestinationAddressPrefix $rule.DestinationAddressPrefix `
-                -DestinationPortRange $rule.DestinationPortRange
+                -SourceAddressPrefix $rule.SourceAddressPrefix.Split(',') `
+                -SourcePortRange $rule.SourcePortRange.Split(',') `
+                -DestinationAddressPrefix $rule.DestinationAddressPrefix.Split(',') `
+                -DestinationPortRange $rule.DestinationPortRange.Split(',')
     }
 
     $template.resources += $nsgResource
