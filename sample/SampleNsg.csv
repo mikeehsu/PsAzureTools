@@ -1,5 +1,4 @@
-NsgName,Location,RuleName,Priority,Access,Direction,Protocol,SourceAddressPrefix,SourcePortRange,DestinationAddressPrefix,DestinationPortRange
-Nsg-Web,East US,AllowHTTP,100,Allow,Inbound,TCP,*,80,*,80
-Nsg-Web,East US,AllowSSL,110,Allow,Inbound,TCP,*,443,*,443
-Nsg-SQL,East US,AllowSQL,100,Allow,Inbound,TCP,*,1443,*,1443
-Nsg-RDP,East US,AllowRDP,100,Allow,Inbound,TCP,*,3389,*,3389
+NsgName,Location,RuleName,Priority,Access,Direction,Protocol,SourceAddressPrefix,SourcePortRange,DestinationAddressPrefix,DestinationPortRange,SourceAsgNames,DestinationAsgNames
+Nsg-Web,USGovVirginia,AllowHTTPSSL,100,Allow,Inbound,TCP,*,*,*,"80,443"
+Nsg-RDP,USGovVirginia,AllowRDP,100,Allow,Inbound,TCP,*,3389,,3389,,"App-Asg"
+Nsg-SQL,USGovVirginia,AllowSQL,100,Allow,Inbound,TCP,*,1443,*,1443

@@ -88,6 +88,7 @@ if ($nsgCount.count -ne $($distinctNsgs | Measure-Object).Count) {
 }
 
 Write-Verbose "Inspection passed"
+$errorFound = $false
 
 # set deployment info
 $deploymentName = $resourceGroupName + $(get-date -f yyyyMMddHHmmss)
@@ -100,6 +101,10 @@ if ($TemplateFile) {
 # start building the template resources
 $template = New-PsArmTemplate
 
+
+# get any application security groups for reference
+$asgs = Get-AzureRmApplicationSecurityGroup
+
 # loop through all Vnets
 foreach ($nsg in $distinctNsgs) {
 
@@ -108,6 +113,67 @@ foreach ($nsg in $distinctNsgs) {
     # loop through all rules
     $rules = $csvFile | Where-Object {$_.NsgName -eq $nsg.NsgName} | Sort
     foreach ($rule in $rules) {
+        # validation checks
+        # check Source Addresses
+        if  ($rule.Psobject.Properties.name -match 'SourceAddressPrefix' -and
+            $rule.SourceAddressPrefix -and
+            $rule.Psobject.Properties.name -match 'SourceAsgNames' -and
+            $rule.SourceAsgNames) {
+
+            if ($rule.SourceAddressPrefix -and $rule.SourceAsgNames) {
+                Write-Error "SourceAddressPrefix and SourceAsgNames cannot be used together."
+                $errorFound = $True
+                continue
+            }
+        }
+
+        # check Destination Addresses
+        if  ($rule.Psobject.Properties.name -match 'DestinationAddressPrefix' -and
+            $rule.DestinationAddressPrefix -and
+            $rule.Psobject.Properties.name -match 'DestinationAsgNames' -and
+            $rule.DestinationAsgNames) {
+
+            if ($rule.DestinationAddressPrefix -and $rule.DestinationAsgNames) {
+                Write-Error "DestinationAddressPrefix and DestinationAsgNames cannot be used together."
+                $errorFound = $True
+                continue
+            }
+        }
+
+        # assign SourceApplicationSecurityGroups
+        $sourceAsgIds = @()
+        if ($rule.Psobject.Properties.name -match 'SourceAsgNames' -and
+            $rule.SourceAsgNames) {
+
+            foreach ($name in $rule.sourceAsgNames) {
+                $asg = @()
+                $asg += $asgs | Where-Object {$_.Name -match $name}
+                if ($asg.Count -ne 1) {
+                    Write-Error "SourceAsgName ($name) not found or contains a duplicate across resource groups."
+                    $errorFound = $True
+                    continue
+                }
+                $sourceAsgIds += $asg.id
+            }
+        }
+
+        # assign DestinationApplicationSecurityGroups
+        $destinationAsgIds = @()
+        if ($rule.Psobject.Properties.name -match 'DestinationAsgNames' -and
+            $rule.DestinationAsgNames) {
+
+            foreach ($name in $rule.DestinationAsgNames) {
+                $asg = @()
+                $asg += $asgs | Where-Object {$_.Name -match $name}
+                if ($asg.Count -ne 1) {
+                    Write-Error "DestinationAsgName ($name) not found or contains a duplicate across resource groups."
+                    $errorFound = $True
+                    continue
+                }
+                $destinationAsgIds += $asg.id
+            }
+        }
+
         $nsgResource = $nsgResource |
              Add-PsArmNetworkSecurityGroupRule -Name $rule.RuleName `
                 -Priority $rule.Priority `
@@ -117,11 +183,17 @@ foreach ($nsg in $distinctNsgs) {
                 -SourceAddressPrefix $rule.SourceAddressPrefix.Split(',') `
                 -SourcePortRange $rule.SourcePortRange.Split(',') `
                 -DestinationAddressPrefix $rule.DestinationAddressPrefix.Split(',') `
-                -DestinationPortRange $rule.DestinationPortRange.Split(',')
+                -DestinationPortRange $rule.DestinationPortRange.Split(',') `
+                -SourceApplicationSecurityGroups $sourceAsgIds `
+                -DestinationApplicationSecurityGroups $destinationAsgIds
     }
 
     $template.resources += $nsgResource
+}
 
+if ($errorFound) {
+    Write-Outpu "Please correct errors and try again."
+    break
 }
 
 # save the template locally
