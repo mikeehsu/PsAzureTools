@@ -164,6 +164,10 @@ foreach ($vmConfig in $csvFile) {
         $vmConfig | Add-Member @{NetworkSecurityGroupName = $null}
     }
 
+    if (-not [bool] ($vmConfig.PSobject.Properties.name -eq "ApplicationSecurityGroupNames")) {
+        $vmConfig | Add-Member @{ApplicationSecurityGroupNames = $null}
+    }
+
 
     # set default values for blank columns
     $createPublicIP = $False
@@ -182,7 +186,13 @@ foreach ($vmConfig in $csvFile) {
     if ([string]::IsNullOrEmpty($vmConfig.DataDiskUri)) {
         $vmConfig.DataDiskUri = $null
     } else {
-        $vmConfig.DataDiskUri= $vmConfig.DataDiskUri.split('|')
+        $vmConfig.DataDiskUri = $vmConfig.DataDiskUri.split('|')
+    }
+
+    if ([string]::IsNullOrEmpty($vmConfig.ApplicationSecurityGroupNames)) {
+        $vmConfig.ApplicationSecurityGroupNames = $null
+    } else {
+        $vmConfig.ApplicationSecurityGroupNames = $vmConfig.ApplicationSecurityGroupNames.split(',')
     }
 
     $vmResource = New-PsArmQuickVm -VmName $vmConfig.VmName `
@@ -204,7 +214,8 @@ foreach ($vmConfig in $csvFile) {
             -Offer $vmConfig.Offer `
             -Sku $vmConfig.Sku `
             -AvailabilitySetName $vmConfig.AvailabilitySetName `
-            -NetworkSecurityGroupName $vmConfig.NetworkSecurityGroupName
+            -NetworkSecurityGroupName $vmConfig.NetworkSecurityGroupName `
+            -ApplicationSecurityGroupNames $vmConfig.ApplicationSecurityGroupNames
 
      $template.resources += $vmResource
 }
