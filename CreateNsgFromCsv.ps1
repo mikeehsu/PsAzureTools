@@ -50,6 +50,56 @@ Param(
 Import-Module -Force PsArmResources
 Set-StrictMode -Version 2.0
 
+
+#####################################################################
+# expand any prefixes containing a vnet name
+function ExpandVnetPrefixes {
+
+    param (
+        [Parameter(Mandatory=$True)]
+        [string]
+        $addressPrefixList
+    )
+
+    $resultPrefix = @()
+
+    $addressPrefixes = $addressPrefixList.Split(',')
+
+    foreach ($addressPrefix in $addressPrefixes) {
+        if ($addressPrefix.Substring(0,1) -match "[a-zA-Z]") {
+            $vnetName, $subnetName = $addressPrefix.Split('/')
+            if (-not $vnetName -or -not $subnetName) {
+                Write-Error "Specifying subnet by name ($addressPrefix) must specify using VnetName/SubnetName."
+                return $addressPrefixList
+            }
+
+            $vnet = @()
+            $vnet += $script:vnets | Where-Object {$_.Name -eq $vnetName}
+            if ($vnet.Count -ne 1) {
+                Write-Error "Virtual Network ($vnetName) does not exist. It must be in the same subscription to specify by name."
+                return $addressPrefixList
+            }
+
+            $subnet = @()
+            $subnet += $vnet.Subnets | Where-Object {$_.Name -eq $subnetName}
+            if ($subnet.Count -ne 1) {
+                Write-Error "Subnet ($subnetName) does not exist in Virtual Network ($vnetName)."
+                return $addressPrefixList
+            }
+
+            $resultPrefix += $subnet.AddressPrefix
+
+        } else {
+            $resultPrefix += $addressPrefix
+        }
+    }
+
+    $result = $resultPrefix -join ','
+    return $result
+}
+
+
+
 # confirm user is logged into subscription
 try {
     $result = Get-AzureRmContext -ErrorAction Stop
@@ -101,9 +151,12 @@ if ($TemplateFile) {
 # start building the template resources
 $template = New-PsArmTemplate
 
-
 # get any application security groups for reference
 $asgs = Get-AzureRmApplicationSecurityGroup
+
+
+# get vnet info for reference
+$script:vnets = Get-AzureRmVirtualNetwork
 
 # loop through all Vnets
 foreach ($nsg in $distinctNsgs) {
@@ -138,6 +191,15 @@ foreach ($nsg in $distinctNsgs) {
                 $errorFound = $True
                 continue
             }
+        }
+
+        # check contents of SourceAddressPrefix
+        if ($rule.SourceAddressPrefix) {
+            $rule.SourceAddressPrefix = ExpandVnetPrefixes -addressPrefixList $rule.SourceAddressPrefix
+        }
+
+        if ($rule.DestinationAddressPrefix) {
+            $rule.DestinationAddressPrefix = ExpandVnetPrefixes -addressPrefixList $rule.DestinationAddressPrefix
         }
 
         # assign SourceApplicationSecurityGroups
@@ -213,11 +275,14 @@ if ($Test) {
 }
 
 # deploy the template
+Write-Verbose "Deploying $deploymentFile ..."
 try {
-    New-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -Force
-    New-AzureRmResourceGroupDeployment -Name $deploymentName -ResourceGroupName $ResourceGroupName -TemplateFile $deploymentFile -Verbose
+    New-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -Force -ErrorAction Stop
+    New-AzureRmResourceGroupDeployment -Name $deploymentName -ResourceGroupName $ResourceGroupName `
+        -TemplateFile $deploymentFile -Verbose
 } catch {
     throw
+    Write-Error "Deployment failed. Please address errors found in $deploymentFile"
     return
 }
 
