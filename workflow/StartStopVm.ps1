@@ -48,7 +48,7 @@
 #
 ##############################
 
-Workflow StartStartVM {
+Workflow StartStopVM {
     Param
     (
         [Parameter(Mandatory = $true)]
