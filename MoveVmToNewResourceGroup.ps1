@@ -62,9 +62,9 @@ function MoveManagedDiskResourceGroup
     }
 
     $snapshot = New-AzureRmSnapshotConfig -SourceUri $disk.Id -CreateOption Copy -Location $disk.Location
-    $snapshot = New-AzureRmSnapshot -Snapshot $snapshot -ResourceGroupName $oldResourceGroupName -SnapshotName $snapshotName
+    $snapshot = New-AzureRmSnapshot -Snapshot $snapshot -ResourceGroupName $ResourceGroupName -SnapshotName $snapshotName
 
-    $diskConfig = New-AzureRmDiskConfig -AccountType $disk.AccountType -Location $snapshot.Location -SourceResourceId $snapshot.Id -CreateOption Copy
+    $diskConfig = New-AzureRmDiskConfig -AccountType $disk.Sku.Name -Location $snapshot.Location -SourceResourceId $snapshot.Id -CreateOption Copy
     $newDisk = New-AzureRmDisk -Disk $diskConfig -ResourceGroupName $newResourceGroupName -DiskName $disk.Name
 
     $null = Remove-AzureRmSnapshot -ResourceGroupName $ResourceGroupName -SnapshotName $snapshotName -Force
