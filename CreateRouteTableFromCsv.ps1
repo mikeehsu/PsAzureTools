@@ -77,7 +77,7 @@ Write-Verbose "Inspecting $Filename"
 $distinctRouteTables = $csvFile |
     Where-Object {$_.Location -ne '' } |
     Select-Object -Property RouteTableName, Location -Unique |
-    Sort
+    Sort-Object
 $routeTableCount = $csvFile |
     Where-Object {$_.Location -ne ''} |
     Select-Object -Property RouteTableName -Unique |
@@ -107,7 +107,7 @@ foreach ($routeTable in $distinctRouteTables) {
     $routeTableResource = New-PsArmRouteTable -Name $routeTable.RouteTableName -Location $routeTable.Location
 
     # loop through all rules
-    $routes = $csvFile | Where-Object {$_.RouteTableName -eq $routeTable.RouteTableName} | Sort
+    $routes = $csvFile | Where-Object {$_.RouteTableName -eq $routeTable.RouteTableName} | Sort-Object
     foreach ($route in $routes) {
         $routeTableResource = $routeTableResource |
              Add-PsArmRoute -Name $route.RouteName `
