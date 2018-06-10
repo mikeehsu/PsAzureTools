@@ -66,7 +66,10 @@ function ExpandVnetPrefixes {
     $addressPrefixes = $addressPrefixList.Split(',')
 
     foreach ($addressPrefix in $addressPrefixes) {
+
         if ($addressPrefix.Substring(0,1) -match "[a-zA-Z]") {
+            # an subnet name is provided
+            # replace with the addressprefix of the subnet
             $vnetName, $subnetName = $addressPrefix.Split('/')
             if (-not $vnetName -or -not $subnetName) {
                 Write-Error "Specifying subnet by name ($addressPrefix) must specify using VnetName/SubnetName."
@@ -90,6 +93,7 @@ function ExpandVnetPrefixes {
             $resultPrefix += $subnet.AddressPrefix
 
         } else {
+            # addressprefix provided
             $resultPrefix += $addressPrefix
         }
     }
@@ -97,7 +101,6 @@ function ExpandVnetPrefixes {
     $result = $resultPrefix -join ','
     return $result
 }
-
 
 
 # confirm user is logged into subscription
