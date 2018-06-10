@@ -1,0 +1,9 @@
+ResourceGroupName,AsgName,VmName
+TestRg,WebAsg,VmWeb1
+TestRg,WebAsg,VmWeb2
+TestRg,AppAsg,VmApp1
+TestRg,AppAsg,VmApp2
+TestRg,DataAsg,VmData1
+TestRg,DataAsg,VmData2
+TestRg,ToolAsg,VmTools1
+TestRg,ToolAsg,VmTools2
