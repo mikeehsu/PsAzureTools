@@ -27,19 +27,7 @@ Provide this parameter if you only want to test the created template, without de
 
 Param(
     [parameter(Mandatory=$True)]
-    [string] $Filename,
-
-    [parameter(Mandatory=$True)]
-    [string] $ResourceGroupName,
-
-    [parameter(Mandatory=$True)]
-    [string] $Location,
-
-    [parameter(Mandatory=$False)]
-    [string] $TemplateFile,
-
-    [parameter(Mandatory=$False)]
-    [switch] $Test
+    [string] $Filename
 )
 
 Class MapProperties {
@@ -124,7 +112,7 @@ $mapList |
     Select-Object -Property ResourceGroupName, Location -Unique |
     Foreach-Object {
         $resourceGroup = New-AzureRmResourceGroup -ResourceGroupName $_.ResourceGroupName -Location $_.Location
-        Write-Output "$($_.ResourceGroupName) created"
+        Write-Output "$($resourceGroup.ResourceGroupName) created"
     }
 
 # create any missing ASGs
