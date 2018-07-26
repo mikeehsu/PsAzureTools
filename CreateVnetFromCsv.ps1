@@ -106,10 +106,10 @@ for ($i=0; $i -lt $csvFile.Length; $i++) {
 
 Write-Verbose "Inspecting $Filename"
 
-# make sure all VnetAddressPrefix & Location are consistent across the entire VnetName
+# make sure all Location are consistent across the entire VnetName
 $distinctVnets = $csvFile |
     # Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} |
-    Select-Object -Property VnetName, Location, VnetAddressPrefix -Unique |
+    Select-Object -Property VnetName, Location -Unique |
     Sort-Object
 $vnetCount = $csvFile |
     # Where-Object {$_.Location -ne '' -or $_.VnetAddressPrefix -ne ''} |
@@ -137,7 +137,9 @@ $template = New-PsArmTemplate
 # loop through all Vnets
 foreach ($vnet in $distinctVnets) {
 
-    $vnetResource = New-PsArmVnet -Name $vnet.VnetName -AddressPrefixes $vnet.VnetAddressPrefix -Location $vnet.Location
+    # create the Vnet object
+    $vnetAddressPrefixes = $($csvFile | Where-Object {$_.VnetName -eq $vnet.VnetName}).VnetAddressPrefix
+    $vnetResource = New-PsArmVnet -Name $vnet.VnetName -AddressPrefixes $vnetAddressPrefixes -Location $vnet.Location
 
     # loop through all subnets
     $subnets = $csvFile | Where-Object {$_.VnetName -eq $vnet.VnetName} | Sort-Object
