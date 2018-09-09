@@ -138,14 +138,14 @@ $template = New-PsArmTemplate
 foreach ($vnet in $distinctVnets) {
 
     # create the Vnet object
-    $vnetAddressPrefixes = $($csvFile | Where-Object {$_.VnetName -eq $vnet.VnetName}).VnetAddressPrefix
+    $vnetAddressPrefixes = $($csvFile | Where-Object {$_.VnetName -eq $vnet.VnetName}).VnetAddressPrefix | Select -Unique
     $vnetResource = New-PsArmVnet -Name $vnet.VnetName -AddressPrefixes $vnetAddressPrefixes -Location $vnet.Location
 
     # loop through all subnets
     $subnets = $csvFile | Where-Object {$_.VnetName -eq $vnet.VnetName} | Sort-Object
     foreach ($subnet in $subnets) {
         $vnetResource = $vnetResource |
-             Add-PsArmVnetSubnet -Name $subnet.SubnetName -AddressPrefix $subnet.SubnetAddressPrefix
+            Add-PsArmVnetSubnet -Name $subnet.SubnetName -AddressPrefix $subnet.SubnetAddressPrefix
     }
 
     $template.resources += $vnetResource
