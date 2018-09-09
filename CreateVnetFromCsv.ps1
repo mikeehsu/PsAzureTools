@@ -170,8 +170,9 @@ if ($Test) {
 
 # deploy the template
 try {
-    New-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -Force
-    New-AzureRmResourceGroupDeployment -Name $deploymentName -ResourceGroupName $ResourceGroupName -TemplateFile $deploymentFile -Verbose
+    New-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -Force -ErrorAction Stop
+    New-AzureRmResourceGroupDeployment -Name $deploymentName -ResourceGroupName $ResourceGroupName `
+        -TemplateFile $deploymentFile -Verbose -ErrorAction Stop
 } catch {
     throw
     return
