@@ -138,7 +138,7 @@ $template = New-PsArmTemplate
 foreach ($vnet in $distinctVnets) {
 
     # create the Vnet object
-    $vnetAddressPrefixes = $($csvFile | Where-Object {$_.VnetName -eq $vnet.VnetName}).VnetAddressPrefix | Select -Unique
+    $vnetAddressPrefixes = $($csvFile | Where-Object {$_.VnetName -eq $vnet.VnetName}).VnetAddressPrefix | Select-Object -Unique
     $vnetResource = New-PsArmVnet -Name $vnet.VnetName -AddressPrefixes $vnetAddressPrefixes -Location $vnet.Location
 
     # loop through all subnets
