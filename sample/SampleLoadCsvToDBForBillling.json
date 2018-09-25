@@ -1,0 +1,19 @@
+{
+  "DBserver": "sample.database.usgovcloudapi.net",
+  "Database": "sample",
+  "Table" : "AzureUsage",
+  "Delimiter": ",",
+  "Skip": 2,
+  "BatchSize": "1000",
+  "ColumnMappings" : {
+    "Account Name": "AccountName",
+    "Tags": {
+      "Tag1": "Tag1Column",
+      "Tag2": "Tag2Column",
+      "Tag3": "Tag3Column"
+    }
+  },
+  "Constants": {
+    "AccountOwnerId": "Azure"
+  }
+}
