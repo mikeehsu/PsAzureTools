@@ -34,6 +34,7 @@ function TestConnection {
     )
 
     Write-Verbose "$IPAddress testing connection"
+    Write-Progress -Activity "Now testing $IPAddress..."
 
     $pingResult = $null
     if ($Ping) {
@@ -51,11 +52,11 @@ function TestConnection {
     for ($i = 1; $i -le $ports.Count; $i++) {
         $port = $Ports[($i - 1)]
         $client = New-Object System.Net.Sockets.TcpClient
-        $beginConnect = $client.BeginConnect($IPAddress, $port, $null, $null)
+        $null = $client.BeginConnect($IPAddress, $port, $null, $null)
         if ($client.Connected) {
             $openPorts += $port
-        }
-        else {
+
+        } else {
             # Wait
             Start-Sleep -Milli $TimeOut
             if ($client.Connected) {
@@ -76,7 +77,7 @@ function TestConnection {
 }
 
 #####################################################################
-function TestIpList {
+function TestIpRange {
 
     Param(
         [parameter(Mandatory=$true)]
@@ -154,6 +155,29 @@ function TestIpList {
     return $result
 }
 
+
+#####################################################################
+function TestIpSet {
+
+    Param(
+        [parameter(Mandatory=$true)]
+        [array] $ipSet,
+
+        [parameter(Mandatory=$false)]
+        [int[]] $Ports = @(80,443,3389),
+
+        [parameter(Mandatory=$false)]
+        [bool] $Ping = $true
+    )
+
+    $result = @()
+
+    foreach ($ipAddress in $ipSet) {
+        $result += TestConnection -IPAddress $ipAddress -Ports $Ports -Ping $Ping
+    }
+    return $result
+}
+
 ############################################################################
 
 $report = @()
@@ -161,21 +185,11 @@ $report = @()
 $tests = Import-Csv -Path $FilePath -Delimiter ','
 
 foreach ($test in $tests) {
-    $ipRange = $test.IpAddress.Split('-')
-
-    $startIp = $ipRange[0]
-    if ($ipRange.Length -eq 1) {
-        $endIp = $startIp
-    } else {
-        $endIp = $ipRange[1]
-    }
-
     # tcp settings
     $portsExpected = @()
     if ($test.PortsExpected.Trim().Length -gt 0) {
-        $portsExpected = $test.PortsExpected.Split(':')
+        $portsExpected = $test.PortsExpected.Split(';')
     }
-
 
     # ping settings
     if ($test.PingTest) {
@@ -186,7 +200,22 @@ foreach ($test in $tests) {
         $pingExpected = $test.PingExpected.StartsWith('Y')
     }
 
-    $testResults = TestIpList -StartIpAddress $startIp -EndIpAddress $endIp -Ports $test.PortsToTest.Split(':') -Ping $pingTest
+    if ($test.IpAddress -like '*-*') {
+        $ipRange = $test.IpAddress.Split('-')
+
+        $startIp = $ipRange[0]
+        if ($ipRange.Length -eq 1) {
+            $endIp = $startIp
+        } else {
+            $endIp = $ipRange[1]
+        }
+
+        $testResults = TestIpRange -StartIpAddress $startIp -EndIpAddress $endIp -Ports $test.PortsToTest.Split(';') -Ping $pingTest
+    } else {
+        $ipSet = $test.IpAddress.Split(';')
+        $testResults = TestIpSet -IpSet $ipSet -Ports $test.PortsToTest.Split(';') -Ping $pingTest
+    }
+
     foreach($testResult in $testResults) {
         $portCompare = Compare-Object $testResult.Ports $portsExpected | Select-Object InputObject
 
