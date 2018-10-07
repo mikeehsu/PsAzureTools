@@ -75,7 +75,7 @@ Workflow StartStopVM {
         [String] $ExcludeDaysOfWeek = ''
     )
 
-    [string] $dow = (date).DayOfWeek
+    [string] $dow = (Get-Date).DayOfWeek
     if ($dow -in $ExcludeDaysOfWeek.Split(',').Trim()) {
         Write-Output "Script does not run on $ExcludeDaysOfWeek. Today is $dow."
         return
