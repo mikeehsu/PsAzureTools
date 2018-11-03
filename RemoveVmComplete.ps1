@@ -218,11 +218,11 @@ try {
                 return
             }
 
-            $context = Set-AzureRmCurrentStorageAccount -ResourceGroupName $storageRg -StorageAccountName $storageAccountName
+            $null = Set-AzureRmCurrentStorageAccount -ResourceGroupName $storageRg -StorageAccountName $storageAccountName
             $container = Get-AzureStorageContainer  | Where-Object {$_.Name -like "bootdiagnostics-*-$($vm.VmId)" }
             if ($container) {
                 Write-Verbose "Removing container: $($container.name) from resourceGroup: $storageRg, storageAccount: $storageAccountName"
-                Remove-AzureStorageContainer -Name $($container.name) -Context $context
+                Remove-AzureStorageContainer -Name $($container.name)
             }
         }
     }
