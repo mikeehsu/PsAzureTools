@@ -130,41 +130,44 @@ try {
 
     # remove all Nics, if necessary
     if (-not $KeepNetworkInterface) {
-        $nicIds = $vm.NetworkInterfaceIDs
+        $nicIds = $vm.NetworkProfile.Networkinterfaces.Id
 
         foreach ($nicId in $nicIds) {
             Write-Verbose "Get NICs info for $nicId"
             $nicResource = Get-AzureRmResource -ResourceId $nicId -ErrorAction 'Stop'
+            $nic = Get-AzureRmNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.Name)
 
-            $nic = Get-AzureRmNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.ResourceName)
-
-            Write-Verbose "Removing NetworkInterface  $($nicResource.ResourceGroupName) / $($nicResource.ResourceName)"
-            $result = Remove-AzureRmNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.ResourceName) -Force
+            Write-Verbose "Removing NetworkInterface $($nicResource.ResourceGroupName) / $($nicResource.Name)"
+            $result = Remove-AzureRmNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.Name) -Force
 
             # remove any Public IPs (attached to Nic), if necessary
             if (-not $KeepPublicIp) {
                 if ($nic.IpConfigurations.publicIpAddress) {
-                    Write-Verbose "Getting Pip info for $($nic.IpConfigurations.publicIpAddress.Id)"
+                    Write-Verbose "Getting public IP $($nic.IpConfigurations.publicIpAddress.Id)"
                     $pipId = $nic.IpConfigurations.publicIpAddress.Id
                     $pipResource = Get-AzureRmResource -ResourceId $pipId -ErrorAction 'Stop'
 
                     if ($pipResource) {
-                        Write-Verbose "Removing Pip $($nic.IpConfigurations.publicIpAddress.Id)"
-                        $result = $( Get-AzureRmPublicIpAddress -ResourceGroupName $($pipResource.ResourceGroupName) -Name $($pipResource.ResourceName) | Remove-AzureRmPublicIpAddress -Force )
+                        Write-Verbose "Removing public IP $($nic.IpConfigurations.publicIpAddress.Id)"
+                        $result = $( Get-AzureRmPublicIpAddress -ResourceGroupName $($pipResource.ResourceGroupName) -Name $($pipResource.Name) | Remove-AzureRmPublicIpAddress -Force )
                     }
                 }
+            } else {
+                Write-Verbose "Keeping public IP..."
             }
 
             # remove unused NetworkSecurityGroup
             if (-not $KeepNetworkSecurityGroup) {
-                Write-Verbose "okay to remove nsg"
                 if ($nic.NetworkSecurityGroup) {
-                    Write-Verbose "attempting to remove nsg"
+                    Write-Verbose "Removing network security group $($nic.NetworkSecurityGroup.Id)"
                     $result = RemoveNetworkSecurityGroupById -nsgId $nic.NetworkSecurityGroup.Id
                 }
+            } else {
+                Write-Verbose "Keeping network security group..."
             }
-
         }
+    } else {
+        Write-Verbose "Keeping network interface(s)... $($vm.NetworkInterfaceIDs)"
     }
 
     # remove OSDisk, if necessary
@@ -183,6 +186,8 @@ try {
             Write-Verbose "Removing OSDisk $osDisk"
             $result = RemoveStorageBlobByUri -Uri $osDisk
         }
+    } else {
+        Write-Verbose "Keeping OS disks..."
     }
 
     # remove DataDisks all data disks, if necessary
@@ -203,6 +208,8 @@ try {
                 $result = RemoveStorageBlobByUri -Uri $vhdUri
             }
         }
+    } else {
+        Write-Verbose "Keeping data disks..."
     }
 
     # delete diagnostic logs
@@ -222,9 +229,11 @@ try {
             $container = Get-AzureStorageContainer  | Where-Object {$_.Name -like "bootdiagnostics-*-$($vm.VmId)" }
             if ($container) {
                 Write-Verbose "Removing container: $($container.name) from resourceGroup: $storageRg, storageAccount: $storageAccountName"
-                Remove-AzureStorageContainer -Name $($container.name)
+                Remove-AzureStorageContainer -Name $($container.name) -Force
             }
         }
+    } else {
+        Write-Verbose "Keeping diagnostic logs... $($vm.DiagnosticsProfile.BootDiagnostics.StorageUri)"
     }
 
     # remove ResourceGroup, if nothing else inside
@@ -235,10 +244,11 @@ try {
             Write-Verbose "Removing resource group $ResourceGroupName"
             $result = Remove-AzureRmResourceGroup -Name $ResourceGroupName -ErrorAction Continue
         }
+    } else {
+        Write-Verbose "Keeping resource group... $ResourceGroupName"
     }
 
-}
-catch {
+} catch {
     $_.Exception
     Write-Error $_.Exception.Message
     Write-Error $result
