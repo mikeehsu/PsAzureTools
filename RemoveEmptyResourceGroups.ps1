@@ -20,6 +20,21 @@ Param (
     [switch] $Remove
 )
 
+# confirm user is logged into subscription
+try {
+    $result = Get-AzureRmContext -ErrorAction Stop
+    if (-not $result.Environment) {
+        Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription (Select-AzureRmSubscription) context before proceeding."
+        exit
+    }
+    $azureEnvironmentName = $result.Environment.Name
+
+} catch {
+    Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription (Select-AzureRmSubscription) context before proceeding."
+    exit
+}
+
+# start processing
 $count = 0
 $emptyGroups = @()
 
