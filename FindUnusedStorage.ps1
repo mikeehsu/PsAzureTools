@@ -1,10 +1,10 @@
 ##############################
 #.SYNOPSIS
-# Find Unused Storage 
-# 
+# Find Unused Storage
+#
 #.DESCRIPTION
-# Find Unused Storage looks for unused VHD files (not attached to a 
-# Virtual Machine) and storage accounts used for boot diagnostics 
+# Find Unused Storage looks for unused VHD files (not attached to a
+# Virtual Machine) and storage accounts used for boot diagnostics
 # which no Virtual Machines are pointing to
 #
 #.PARAMETER CleanupScript
@@ -15,7 +15,7 @@
 # FindUnusedStorage.ps1 -CleanUpScript .\cleanupmyaccount.ps1
 #
 #.NOTES
-# 
+#
 ##############################
 
 Param(
@@ -76,16 +76,27 @@ function IsAccountUsedByDiagnostics
 }
 
 
-# $VerbosePreference = 'Continue'
+# confirm user is logged into subscription
+try {
+    $result = Get-AzureRmContext -ErrorAction Stop
+    if (-not $result.Environment) {
+        Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription (Select-AzureRmSubscription) context before proceeding."
+        exit
+    }
+    $azureEnvironmentName = $result.Environment.Name
 
+} catch {
+    Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription (Select-AzureRmSubscription) context before proceeding."
+    exit
+}
+
+# start processing
 $vms = Get-AzureRmVM
-
 $storageAccounts = Get-AzureRMStorageAccount
 
 foreach ($storageAccount in $storageAccounts) {
 
     Write-Verbose "Checking account: $($storageAccount.StorageAccountName)..."
-
 
     if ($storageAccount.StorageAccountName -like '*diag*') {
         $isUsed = IsAccountUsedByDiagnostics -VmList $vms -StorageAccountName $storageAccount.StorageAccountName
