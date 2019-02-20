@@ -45,6 +45,10 @@
 # This parameter specifies how many rows to process before
 # writing the results to the database.
 #
+#.PARAMETER StartOnDataRow
+# This parameter specifies which data row to start loading on, 
+# skipping unnecessary data rows immediately after the header.
+#
 #.EXAMPLE
 # .\LoadCsvToDB.ps1 -FilePath SampleCsv.csv -ConfigFilePath .\Sample\SampleLoadCsvToDBForBilling.json
 #
@@ -81,7 +85,10 @@ Param (
     [string] $Skip,
 
     [Parameter(Mandatory=$false)]
-    [int] $BatchSize
+    [int] $BatchSize,
+
+    [Parameter(Mandatory=$false)]
+    [int] $StartOnDataRow = 1
 )
 
 # load needed assemblies
@@ -327,13 +334,13 @@ try {
         $lineCount++
     }
     $reader.Close()
-    $lineCount -= $Skip
 } catch {
     throw
     return
 }
 
-Write-host $lineCount
+Write-Verbose "$lineCount lines in $($fileInfo.FullName)"
+$lineCount -= $Skip + $StartOnDataRow
 
 # create bulkcopy connection
 $bulkcopy = New-Object Data.SqlClient.SqlBulkCopy($connectionstring, [System.Data.SqlClient.SqlBulkCopyOptions]::TableLock)
@@ -348,40 +355,51 @@ if ($constantExpression) {
     Invoke-Expression $constantExpression
 }
 
-$i = 0
-Write-Progress -Activity "Loading rows to database..." -Status "$lineCount rows to add"
+$added = 0
+$rowNumber = 0
+if ($StartOnDataRow -gt 1) {
+    Write-Progress -Activity "Loading rows to database..." -Status "Starting on row #$StartOnDataRow"
+} else {
+    Write-Progress -Activity "Loading rows to database..." -Status "$lineCount rows to add"
+}
+
 # Import-Csv -Path $filePath -Delimiter $Delimiter | ForEach-Object {
 Get-Content -Path $filePath -ErrorAction Stop |
     Select-Object -Skip $Skip |
     ConvertFrom-Csv -Delimiter $Delimiter |
     ForEach-Object  {
-    $fileRow = $_
 
-    # assign expanded JSON if any
-    if ($expandJsonExpression) {
-        Invoke-Expression $expandJsonExpression
-    }
+    $rowNumber++
+    if ($rowNumber -ge $StartOnDataRow) {
 
-    # assign all the mappinge
-    Invoke-Expression $rowExpression
+        $fileRow = $_
 
-    # load the SQL datatable
-    $null = $tableData.Rows.Add($tableRow)
-    $i++
-
-    if (($i % $BatchSize) -eq 0) {
-        try {
-            $bulkcopy.WriteToServer($tableData)
-        } catch {
-            Write-Output "Error on or about row $i"
-            Write-Output $tableData.Rows
-            throw
-            return
-        } finally {
-            $tableData.Clear()
+        # assign expanded JSON if any
+        if ($expandJsonExpression) {
+            Invoke-Expression $expandJsonExpression
         }
-        $percentage = $i / $lineCount * 100
-        Write-Progress -Activity "Loading rows to database..." -Status "$i of $lineCount added..." -PercentComplete $percentage
+
+        # assign all the mappinge
+        Invoke-Expression $rowExpression
+
+        # load the SQL datatable
+        $null = $tableData.Rows.Add($tableRow)
+        $added++
+
+        if (($added % $BatchSize) -eq 0) {
+            try {
+                $bulkcopy.WriteToServer($tableData)
+            } catch {
+                Write-Output "Error on or about row $i"
+                Write-Output $tableData.Rows
+                throw
+                return
+            } finally {
+                $tableData.Clear()
+            }
+            $percentage = $added / $lineCount * 100
+            Write-Progress -Activity "Loading rows to database..." -Status "$added of $lineCount added" -PercentComplete $percentage
+        }
     }
 }
 
@@ -392,7 +410,7 @@ if ($tableData.Rows.Count -gt 0) {
 
 #ENDREGION
 
-Write-Output "$i rows have been inserted into the database."
+Write-Output "$added rows have been inserted into the database."
 Write-Output "Total Elapsed Time: $($elapsed.Elapsed.ToString())"
 
 # Clean Up
