@@ -17,6 +17,8 @@ Below is a list of commands available in the PsAzureTools module:
 
 ## Stand-Alone tools
 
+- **AddRoutesForAzureServices.ps1** - Download IP Addresses from Microsoft and add routes to a route table.
+
 - **CreateNsgFromCsv.ps1** - Create Network Security Groups from a CSV document.
 
 - **CreateRouteTableFromCsv.ps1** - Create Route Tables from a CSV document.
