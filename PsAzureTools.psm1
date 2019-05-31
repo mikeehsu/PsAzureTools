@@ -60,7 +60,7 @@ function Remove-PsAzNetworkSecurityGroupById {
         Write-Verbose "NetworkSecurityGroup $($resourceGroupName) / $($networkSecurityGroupName) is still being used"
     } else {
         Write-Verbose "Removing NetworkSecurityGroup $($resoruceGroupName) / $($networkSecurityGroupName)"
-        $result = Remove-AzureRmNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Name $networkSecurityGroupName -Force
+        $null = Remove-AzureRmNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Name $networkSecurityGroupName -Force
     }
 
     return
@@ -206,8 +206,7 @@ Function Remove-PsAzVmComplete
                         $result = Remove-PsAzNetworkSecurityGroupById -nsgId $nic.NetworkSecurityGroup.Id
                     }
                 }
-
-           }
+            }
         }
 
         # remove OSDisk, if necessary
@@ -250,6 +249,7 @@ Function Remove-PsAzVmComplete
     } catch {
         $_.Exception
         Write-Error $_.Exception.Message
+        Write-Erorr $result
         Write-Error "Unable to reomve all components of the VM. Please check to make sure all components were properly removed."
         return
     }
@@ -279,7 +279,7 @@ Function Update-PsAzVm
 
         [parameter(Mandatory=$False)]
         [string] $AvailabilitySetId
-   )
+    )
 
     Write-Verbose "Getting VM info for $FromVmName"
 
