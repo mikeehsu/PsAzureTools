@@ -218,8 +218,8 @@ $connectionString = "Server=$DbServer;Database=$Database;User Id=$UserId;Passwor
 
 #REGION create column mapping for row data
 # get columns from table
+$head = $Skip + 2 # skip down to header rows
 Write-Verbose "Loading column headers..."
-$head = $skip + 2
 $fileColumns = Get-Content -Path $filePath -Head $head -ErrorAction Stop |
     Select-Object -Skip $skip |
     ConvertFrom-Csv -Delimiter $Delimiter
@@ -300,7 +300,13 @@ for ($i=0; $i -lt $mapJsonItems.count; $i++) {
     if ($expandJsonxpression) {
         $expandJsonExpression += "; "
     }
-    $expandJsonExpression += "if (`$fileRow.`'$($mapJsonItems[$i])`') { `$fileRow.'" + $mapJsonItems[$i] + "' = `$fileRow.'" + $mapJsonItems[$i] + "' | ConvertFrom-Json }"
+
+    if ($map.ColumnWrapJson -and $map.ColumnWrapJson -contains $mapJsonItems[$i]) {
+        # wrap brackets around JSON string
+        $expandJsonExpression += "if (`$fileRow.`'$($mapJsonItems[$i])`') { `$fileRow.'" + $mapJsonItems[$i] + "' = '{' + `$fileRow.'" + $mapJsonItems[$i] + "' + '}' | ConvertFrom-Json }"   
+    } else {
+        $expandJsonExpression += "if (`$fileRow.`'$($mapJsonItems[$i])`') { `$fileRow.'" + $mapJsonItems[$i] + "' = `$fileRow.'" + $mapJsonItems[$i] + "' | ConvertFrom-Json }"
+    }
 }
 
 # build constant assignments
