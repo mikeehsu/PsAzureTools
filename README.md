@@ -17,7 +17,7 @@ Below is a list of commands available in the PsAzureTools module:
 
 ## Stand-Alone tools
 
-- **AddRoutesForAzureServices.ps1** - Download IP Addresses from Microsoft and add routes to a route table.
+- **AddRoutesForAzureServices.ps1** - Download IP Addresses for Azure servcies from Microsoft and add routes to a route table.
 
 - **CreateNsgFromCsv.ps1** - Create Network Security Groups from a CSV document.
 
@@ -38,6 +38,8 @@ Below is a list of commands available in the PsAzureTools module:
 - **FindUnusedStorage.ps1** - List all orphaned storage accounts.
 
 - **MoveVmToNewResourceGroup.ps1** - Move virtual machines (with Managed Disk attached) to a different resource group.
+
+- **TestConnectivity.ps1** - Test connection to given IP addresses on specified ports.
 
 ## Contributing
 
