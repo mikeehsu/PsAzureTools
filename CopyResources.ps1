@@ -21,12 +21,18 @@ Name of resource group where resources will be copied to
 .PARAMETER DestinationLocation
 
 Location where resources will be copied to. If DestinationLocation is not provided the copy will be placed in the same location as the original.
+.PARAMETER MappingFile
+
+Filepath of comma separated file containing mapping of resources referenced by this resource group that differ from the source. The file should contain two columns: OriginalResourceId, NewResourceId. Headers are required.
 .PARAMETER CopyDiskContents
 
 Set this parameter to TRUE to make a copy of the disks. Disk copies will only be made in the current location. Cross-region copies of disks is currently not supported.
 .PARAMETER AdminPassword
 
-Admin password that should be set for virtual machines that are created without copying the disks.
+Provide an Admin password that should be set for virtual machines that are created without copying the disks. A randomly generated password will be set if not provided.
+.PARAMETER ExportTemplateOnly
+
+Output the generated ARM template and stop. If this parameter is set to true, no resources will be copied.
 .EXAMPLE
 
 .\CopyResources.ps1 -SourceResourceGroupName sample-rg -DestinationResourceGroup copy-of-sample-rg
@@ -48,10 +54,16 @@ Param(
     [string] $DestinationLocation,
 
     [parameter(Mandatory=$False)]
+    [array] $MappingFile,
+
+    [parameter(Mandatory=$False)]
     [boolean] $CopyDiskContents,
 
     [parameter(Mandatory=$False)]
-    [boolean] $AdminPassword
+    [string] $AdminPassword,
+
+    [parameter(Mandatory=$False)]
+    [boolean] $ExportTemplateOnly
 )
 
 #######################################m################################
@@ -92,7 +104,7 @@ function UpdateSubnet {
 
             if ($nsgResourceGroupName -ne $SourceResourceGroupName) {
                 if ($DestinationLocation) {
-                    Write-Error "Network Security Group ($nsgResourceName) not in ResourceGroup ($SourceResourceGroupName). Must be created and associated manually. Reference to $nsgResourceName will be removed."
+                    Write-Warning "Network Security Group ($nsgResourceName) not in ResourceGroup ($SourceResourceGroupName). Must be created and associated manually. Reference to $nsgResourceName will be removed."
                     $subnet.properties.networkSecurityGroup = $null
                 }
             }
@@ -116,6 +128,11 @@ function UpdateSubnet {
 $startTime = Get-Date
 
 # validate parameters
+if (-not $AdminPassword) {
+    $AdminPassword = -join ((48..57) + (65..91) + (97..122) | Get-Random -Count 15 | % {[char]$_})
+}
+
+
 if (-not $CopyDiskContents -and -not $adminPassword) {
     Write-Error "INVALID OPTIONS: -AdminPassword required if disk contents are not being copied."
     exit
@@ -240,12 +257,16 @@ foreach ($resource in $template.resources) {
 
     elseif ($resource.Type -eq "Microsoft.Network/applicationGateways") {
         # remove NIC dependencies as NIC contains the applicationGateway. the NIC ID's on the LB are reference only
-        [array] $resource.dependsOn = $resource.dependsOn | Where-Object {$_ -notlike "*Microsoft.Network/networkInterfaces*"}
+        if ($resource.dependsOn) {
+            [array] $resource.dependsOn = $resource.dependsOn | Where-Object {$_ -notlike "*Microsoft.Network/networkInterfaces*"}
+        }
     }
 
     elseif ($resource.Type -eq "Microsoft.Network/loadBalancers") {
         # remove NIC dependencies as NIC contains the loadBalancer. the NIC ID's on the LB are reference only
-        [array] $resource.dependsOn = $resource.dependsOn | Where-Object {$_ -notlike "*Microsoft.Network/networkInterfaces*"}
+        if ($resource.dependsOn) {
+            [array] $resource.dependsOn = $resource.dependsOn | Where-Object {$_ -notlike "*Microsoft.Network/networkInterfaces*"}
+        }
     }
 
     elseif ($resource.Type -eq "Microsoft.Network/loadBalancers/inboundNatRules") {
@@ -273,7 +294,7 @@ foreach ($resource in $template.resources) {
 
         if ($resource.properties.dnsSettings) {
             $resource.properties.dnsSettings = $null
-            Write-Warning "PUBLIC IP MODIFIED:  $($resource.ResourceType) ($($resource.name)) DNS settings ignored. Update settings as needed after deployment."
+            Write-Warning "PUBLIC IP MODIFIED: $($resource.Type) ($($resource.name)) DNS settings ignored. Update settings as needed after deployment."
         }
     }
 
@@ -311,17 +332,36 @@ foreach ($resource in $template.resources) {
 }
 
 $template.resources = $finalResources
-$template | ConvertTo-Json -Depth 10 > $DestinationTemplateFilepath
+$templateJson = $template | ConvertTo-Json -Depth 10
+
+# replace all mappings
+$mappings = Import-Csv $MappingFile
+foreach ($mapping in $mappings) {
+    $templateJson = $templateJson.Replace('"' + $mapping.originalResourceId + '"', '"' + $mapping.newResourceId + '"')
+}
+$templateJson | Set-Content -Path $DestinationTemplateFilepath
+
+# Only export the template and stop
+if ($ExportTemplateOnly) {
+    Get-Content -Path $DestinationTemplateFilepath
+    exit
+}
 
 # start copy processing
 Write-Progress -Activity "Copy started..."
 
 # make sure ResourceGroup exists
-$location = $DestinationLocation
-if (-not $location) {
-    $location = $sourceResourceGroup.Location
+try {
+    $location = $DestinationLocation
+    if (-not $location) {
+        $location = $sourceResourceGroup.Location
+    }
+    $null = New-AzResourceGroup -Name $DestinationResourceGroupName -Location $location -Force -ErrorAction Stop
+
+} catch {
+    Write-Error "Error accessing Resource Group $DestinationResourceGroupName - $($_.Exception)"
+    exit
 }
-$null = New-AzResourceGroup -Name $DestinationResourceGroupName -Location $location -Force
 
 # copy any disks needed
 if ($disksToCopy) {
