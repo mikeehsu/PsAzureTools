@@ -20,10 +20,10 @@ Names of specific resources to copy. If none are provided the entire resource gr
 Name of resource group where resources will be copied to
 .PARAMETER DestinationLocation
 
-Location where resources will be copied to. If DestinationLocation is not provided the copy will be placed in the same location as the original.
+Location where resources will be copied to. If DestinationLocation is not provided the copy will be placed in the same location as the source.
 .PARAMETER MappingFile
 
-Filepath of comma separated file containing mapping of resources referenced by this resource group that differ from the source. The file should contain two columns: OriginalResourceId, NewResourceId. Headers are required.
+Filepath of comma separated file containing mapping of resources referenced by this resource group that differ from the source. The file should contain two columns: SourceResourceId, DestinationResourceId. Headers are required.
 .PARAMETER CopyDiskContents
 
 Set this parameter to TRUE to make a copy of the disks. Disk copies will only be made in the current location. Cross-region copies of disks is currently not supported.
@@ -337,7 +337,7 @@ $templateJson = $template | ConvertTo-Json -Depth 10
 # replace all mappings
 $mappings = Import-Csv $MappingFile
 foreach ($mapping in $mappings) {
-    $templateJson = $templateJson.Replace('"' + $mapping.originalResourceId + '"', '"' + $mapping.newResourceId + '"')
+    $templateJson = $templateJson.Replace('"' + $mapping.SourceResourceId + '"', '"' + $mapping.DestinationResourceId + '"')
 }
 $templateJson | Set-Content -Path $DestinationTemplateFilepath
 
