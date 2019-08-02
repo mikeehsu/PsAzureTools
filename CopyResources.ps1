@@ -63,7 +63,10 @@ Param(
     [string] $AdminPassword,
 
     [parameter(Mandatory=$False)]
-    [boolean] $ExportTemplateOnly
+    [boolean] $ExportTemplateOnly,
+
+    [parameter(Mandatory=$False)]
+    [boolean] $KeepSourceIPAddresses = $false
 )
 
 #######################################m################################
@@ -245,7 +248,10 @@ foreach ($resource in $template.resources) {
         } else {
             $resource.properties.osProfile | Add-Member -NotePropertyName adminPassword -NotePropertyValue $adminPassword
             $resource.properties.storageProfile.osDisk.managedDisk.id = $null
-            $resource.properties.storageProfile.dataDisks = $null
+            foreach ($dataDisk in $resource.properties.storageProfile.dataDisks) {
+                $dataDisk.createOption = 'Empty'
+                $dataDisk.managedDisk.id = $null
+            }
         }
     }
 
@@ -260,12 +266,27 @@ foreach ($resource in $template.resources) {
         if ($resource.dependsOn) {
             [array] $resource.dependsOn = $resource.dependsOn | Where-Object {$_ -notlike "*Microsoft.Network/networkInterfaces*"}
         }
+
+        if ($KeepSourceIPAddresses) {
+            foreach ($ipconfig in $resource.Properties.frontendIPConfigurations) {
+                if ($ipConfig.properties.privateIPAddress) {
+                    $ipConfig.properties.privateIPAllocationMethod = 'Static'
+    
+                }
+            }
+        }
     }
 
     elseif ($resource.Type -eq "Microsoft.Network/loadBalancers") {
         # remove NIC dependencies as NIC contains the loadBalancer. the NIC ID's on the LB are reference only
         if ($resource.dependsOn) {
             [array] $resource.dependsOn = $resource.dependsOn | Where-Object {$_ -notlike "*Microsoft.Network/networkInterfaces*"}
+        }
+
+        if ($KeepSourceIPAddresses) {
+            foreach ($ipconfig in $resource.Properties.frontendIPConfigurations) {
+                $ipConfig.properties.privateIPAllocationMethod = 'Static'
+            }
         }
     }
 
@@ -274,9 +295,12 @@ foreach ($resource in $template.resources) {
     }
 
     elseif ($resource.Type -eq "Microsoft.Network/networkInterfaces") {
-        # no changes required
+        if ($KeepSourceIPAddresses) {
+            foreach ($ipConfig in $resource.Properties.ipConfigurations) {
+                $ipConfig.properties.privateIPAllocationMethod = 'Static'
+            }
+        }
     }
-
 
     elseif ($resource.Type -eq "Microsoft.Network/networkSecurityGroups") {
         # no changes required
@@ -373,13 +397,20 @@ if ($disksToCopy) {
 }
 
 # deploy template
-$deploymentName = $DestinationResourceGroupName + '_' + $(Get-Date -Format 'yyyyMMddhhmmss')
+try {
+    $deploymentName = $DestinationResourceGroupName + '_' + $(Get-Date -Format 'yyyyMMddhhmmss')
+    $job = New-AzResourceGroupDeployment -Name $deploymentName -TemplateFile $DestinationTemplateFilepath -ResourceGroupName $DestinationResourceGroupName -AsJob -ErrorAction Stop
+} catch {
+    Write-Error "Error starting deployment - $($_.Exception)" -ErrorAction Stop
+}
+
 Write-Progress -Activity "Deploying Resources ($deploymentName)..."
-$job = New-AzResourceGroupDeployment -Name $deploymentName -TemplateFile $DestinationTemplateFilepath -ResourceGroupName $DestinationResourceGroupName -AsJob
 do {
     Start-Sleep 10
-    $operation = Get-AzResourceGroupDeploymentOperation -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName
-    Write-Progress -Activity "Deploying Resources ($deploymentName)..." -Status "Working on $($operation[0].properties.targetResource.resourceName)"
+    $operation = Get-AzResourceGroupDeploymentOperation -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName -ErrorAction 'Stop'
+    $working = $operation.Properties | Where-Object {$_.provisioningState -ne 'Succeeded'}
+
+    Write-Progress -Activity "Deploying Resources ($deploymentName)..." -Status "Working on $($working.targetResource.resourceName -join ', ')"
 
     $status = Get-Job -Id $job.Id
 } while ($status.state -eq 'Running')
