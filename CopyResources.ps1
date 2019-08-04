@@ -1,40 +1,38 @@
 <#
 .SYNOPSIS
-
 Make a copy of resources or an entire resource group.
-.DESCRIPTION
 
+.DESCRIPTION
 This Powershell command will make a copy specific resources or a entire resource group.
 
 .PARAMETER Filename
-
 Name of file containing Network Security Group configuration
+
 .PARAMETER SourceResourceGroupname
-
 Name of ResourceGroup to copy
+
 .PARAMETER SourceResourceNames
-
 Names of specific resources to copy. If none are provided the entire resource group will be copied.
+
 .PARAMETER DestinationResourceGroupName
-
 Name of resource group where resources will be copied to
+
 .PARAMETER DestinationLocation
-
 Location where resources will be copied to. If DestinationLocation is not provided the copy will be placed in the same location as the source.
+
 .PARAMETER MappingFile
-
 Filepath of comma separated file containing mapping of resources referenced by this resource group that differ from the source. The file should contain two columns: SourceResourceId, DestinationResourceId. Headers are required.
+
 .PARAMETER CopyDiskContents
-
 Set this parameter to TRUE to make a copy of the disks. Disk copies will only be made in the current location. Cross-region copies of disks is currently not supported.
+
 .PARAMETER AdminPassword
-
 Provide an Admin password that should be set for virtual machines that are created without copying the disks. A randomly generated password will be set if not provided.
+
 .PARAMETER ExportTemplateOnly
-
 Output the generated ARM template and stop. If this parameter is set to true, no resources will be copied.
-.EXAMPLE
 
+.EXAMPLE
 .\CopyResources.ps1 -SourceResourceGroupName sample-rg -DestinationResourceGroup copy-of-sample-rg
 #>
 
@@ -159,7 +157,7 @@ if ($SkipVirtualMachines -or $SkipDisks) {
     }
 
     if (-not $AdminPassword) {
-        $AdminPassword = -join ((48..57) + (65..91) + (97..122) | Get-Random -Count 15 | % {[char]$_})
+        $AdminPassword = -join ((48..57) + (65..91) + (97..122) | Get-Random -Count 15 | ForEach-Object {[char]$_})
     }
 }
 
