@@ -50,7 +50,7 @@ Param(
     [parameter(Mandatory=$True)]
     [string] $DestinationResourceGroupName,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory=$True)]
     [string] $DestinationLocation,
 
     [parameter(Mandatory=$False)]
@@ -66,7 +66,10 @@ Param(
     [boolean] $ExportTemplateOnly,
 
     [parameter(Mandatory=$False)]
-    [boolean] $KeepSourceIPAddresses = $false
+    [boolean] $KeepSourceIPAddresses,
+
+    [parameter(Mandatory=$False)]
+    [boolean] $SkipVirtualMachines
 )
 
 #######################################m################################
@@ -131,26 +134,32 @@ function UpdateSubnet {
 $startTime = Get-Date
 
 # validate parameters
-if (-not $AdminPassword) {
-    $AdminPassword = -join ((48..57) + (65..91) + (97..122) | Get-Random -Count 15 | % {[char]$_})
+
+$sourceResourceGroup = Get-AzResourceGroup -ResourceGroupName $SourceResourceGroupName -ErrorAction SilentlyContinue
+if (-not $sourceResourceGroup) {
+    Write-Error "Unable to read Resource Group ($sourceResourceGroupName). Please check and try again."
+    return
 }
 
+if ($SkipVirtualMachines -or $SkipDisks) {
+    # do nothing
 
-if (-not $CopyDiskContents -and -not $adminPassword) {
-    Write-Error "INVALID OPTIONS: -AdminPassword required if disk contents are not being copied."
-    exit
-}
-
-$sourceResourceGroup = Get-AzResourceGroup -ResourceGroupName $SourceResourceGroupName
-if ($CopyDiskContents) {
-    if ($DestinationLocation -and ($sourceResourceGroup.Location -ne $DestinationLocation)) {
-        Write-Error "INVALID OPTIONS: Cross-Region copy of disk content not yet supported. Use -CopyDiskContent set to FALSE."
-        exit
-    }
 } else {
+    # make sure parameters set for copying VMs
+
+    if ($CopyDiskContents) {
+        if ($DestinationLocation -and ($sourceResourceGroup.Location -ne $DestinationLocation)) {
+            Write-Error "INVALID OPTIONS: Cross-Region copy of disk content not yet supported. Use -CopyDiskContent set to FALSE."
+            return
+        }
+    } else {
+        if (-not $AdminPassword) {
+            Write-Warning 'ADMIN PASSWORD randomly generated. Please reset password to access virtual machines.'
+        }
+    }
+
     if (-not $AdminPassword) {
-        Write-Error "INVALID OPTIONS: -AdminPassword required if disk contents are not being copied."
-        exit
+        $AdminPassword = -join ((48..57) + (65..91) + (97..122) | Get-Random -Count 15 | % {[char]$_})
     }
 }
 
@@ -228,6 +237,10 @@ foreach ($resource in $template.resources) {
     }
 
     elseif ($resource.Type -eq "Microsoft.Compute/virtualMachines") {
+        if ($SkipVirtualMachines) {
+            continue
+        }
+
         if ($resource.identity) {
             $resource.identity = $null
         }
@@ -269,9 +282,8 @@ foreach ($resource in $template.resources) {
 
         if ($KeepSourceIPAddresses) {
             foreach ($ipconfig in $resource.Properties.frontendIPConfigurations) {
-                if ($ipConfig.properties.privateIPAddress) {
+                if ($ipConfig.properties.privateIPAddress -and $ipconfig.properties.subnet) {
                     $ipConfig.properties.privateIPAllocationMethod = 'Static'
-    
                 }
             }
         }
@@ -285,7 +297,9 @@ foreach ($resource in $template.resources) {
 
         if ($KeepSourceIPAddresses) {
             foreach ($ipconfig in $resource.Properties.frontendIPConfigurations) {
-                $ipConfig.properties.privateIPAllocationMethod = 'Static'
+                if ($ipConfig.properties.privateIPAddress -and $ipconfig.properties.subnet) {
+                    $ipConfig.properties.privateIPAllocationMethod = 'Static'
+                }
             }
         }
     }
@@ -359,9 +373,11 @@ $template.resources = $finalResources
 $templateJson = $template | ConvertTo-Json -Depth 10
 
 # replace all mappings
-$mappings = Import-Csv $MappingFile
-foreach ($mapping in $mappings) {
-    $templateJson = $templateJson.Replace('"' + $mapping.SourceResourceId + '"', '"' + $mapping.DestinationResourceId + '"')
+if ($MappingFile) {
+    $mappings = Import-Csv $MappingFile
+    foreach ($mapping in $mappings) {
+        $templateJson = $templateJson.Replace('"' + $mapping.SourceResourceId + '"', '"' + $mapping.DestinationResourceId + '"')
+    }
 }
 $templateJson | Set-Content -Path $DestinationTemplateFilepath
 
@@ -401,19 +417,28 @@ try {
     $deploymentName = $DestinationResourceGroupName + '_' + $(Get-Date -Format 'yyyyMMddhhmmss')
     $job = New-AzResourceGroupDeployment -Name $deploymentName -TemplateFile $DestinationTemplateFilepath -ResourceGroupName $DestinationResourceGroupName -AsJob -ErrorAction Stop
 } catch {
-    Write-Error "Error starting deployment - $($_.Exception)" -ErrorAction Stop
+    Write-Error "Error starting deployment - $result - $($_.Exception)" -ErrorAction Stop
 }
 
 Write-Progress -Activity "Deploying Resources ($deploymentName)..."
-do {
+Start-Sleep 10
+$job = Get-Job -Id $job.Id
+while ($job.state -eq 'Running') {
     Start-Sleep 10
     $operation = Get-AzResourceGroupDeploymentOperation -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName -ErrorAction 'Stop'
     $working = $operation.Properties | Where-Object {$_.provisioningState -ne 'Succeeded'}
 
     Write-Progress -Activity "Deploying Resources ($deploymentName)..." -Status "Working on $($working.targetResource.resourceName -join ', ')"
 
-    $status = Get-Job -Id $job.Id
-} while ($status.state -eq 'Running')
+    $job = Get-Job -Id $job.Id
+}
+
+if ($job.state -eq 'Failed') {
+    $job.error.exception | Write-Error
+    Write-Output "Deployment ($deploymentName) Failed q"
+    return
+}
+
 # Remove-Job -Id $job.Id
 
 $deployment = Get-AzResourceGroupDeployment -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName
