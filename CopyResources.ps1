@@ -442,7 +442,7 @@ $deployment = Get-AzResourceGroupDeployment -ResourceGroupName $DestinationResou
 
 $failedOperations = Get-AzResourceGroupDeploymentOperation -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName  | Where-Object { $_.Properties.ProvisioningState -ne 'Succeeded' }
 if ($failedOperations) {
-    $errorMsg = @()
+    $errorMsg = $null
     foreach ($failedOperation in $failedOperations) {
         $targetResourceName = $($failedOperation.properties.targetResource.Id -split '/')[-1]
         $errorMsg += "$($targetResourceName) - $($failedOperation.properties.statusMessage.error.message)`n"
