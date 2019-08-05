@@ -1,41 +1,39 @@
 <#
 .SYNOPSIS
-
 Make a copy of resources or an entire resource group.
-.DESCRIPTION
 
+.DESCRIPTION
 This Powershell command will make a copy specific resources or a entire resource group.
 
 .PARAMETER RecoveryVaultResourceGroupName
-
 Name of file Resource Group of the Recovery Vault
+
 .PARAMETER RecoveryVaultName
-
 Name of the Recovery Vault
+
 .PARAMETER PrimaryResourceGroupName
-
 Name of the Primary Resource Group for VMs to be protected
+
 .PARAMETER PrimaryVnetResourceGroupName
-
 Resource Group Name of the Primary Virtual Network
+
 .PARAMETER PrimaryVnetName
-
 Name of the Primary Virtual Network
+
 .PARAMETER RecoveryResourceGroupName
-
 Name of resource group to put failover virtual machines and disks in
+
 .PARAMETER RecoveryLocation
-
 Location for site recovery
+
 .PARAMETER RecoveryVnetResourceGroupName
-
 Name of the Resource Group where the virtual network for failover is deployed in
+
 .PARAMETER RecoveryVnetName
-
 Virtual network to deploy failover virtual machines into
-.EXAMPLE
 
-.\CreateSiteRecovery.ps1
+.EXAMPLE
+.\CreateSiteRecovery.ps1 -RecoveryVaultResourceGroupName 'asr-vault-rg' -RecoveryVaultName 'asr-vault' -PrimaryResourceGroupName 'myproject-rg' -PrimaryVnetResourceGroupName 'vnet-east-rg' -PrimaryVnetName 'vnet-east' -RecoveryResourceGroupName 'myproject-dr-rg' -RecoveryLocation 'westus' -RecoveryVnetResourceGroupName 'vnet-west-rg' -RecoveryVnetName 'vnet-east'
 #>
 
 [CmdletBinding()]
@@ -182,7 +180,7 @@ try {
     $null = Set-ASRVaultContext -Vault $recoveryVault
     $null = Set-AzRecoveryServicesAsrVaultContext -Vault $recoveryVault
 } catch {
-    Write-Error "Error creating Recovery Vault ($RecoveryVaultName) -  $($_.Exception)" -ErrorAction Stop
+    Write-Error "Error creating Recovery Vault ($RecoveryVaultName) - $($_.Exception)" -ErrorAction Stop
 }
 
 # create ASR fabric
