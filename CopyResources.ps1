@@ -52,7 +52,7 @@ Param(
     [string] $DestinationLocation,
 
     [parameter(Mandatory=$False)]
-    [array] $MappingFile,
+    [string] $MappingFile,
 
     [parameter(Mandatory=$False)]
     [boolean] $CopyDiskContents,
@@ -433,15 +433,23 @@ while ($job.state -eq 'Running') {
 
 if ($job.state -eq 'Failed') {
     $job.error.exception | Write-Error
-    Write-Output "Deployment ($deploymentName) Failed q"
+    Write-Output "Failed creating deployment job ($deploymentName) Failed"
     return
 }
 
-# Remove-Job -Id $job.Id
-
+# get deployment status & any failures
 $deployment = Get-AzResourceGroupDeployment -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName
+
+$failedOperations = Get-AzResourceGroupDeploymentOperation -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName  | Where-Object { $_.Properties.ProvisioningState -ne 'Succeeded' }
+if ($failedOperations) {
+    $errorMsg = @()
+    foreach ($failedOperation in $failedOperations) {
+        $targetResourceName = $($failedOperation.properties.targetResource.Id -split '/')[-1]
+        $errorMsg += "$($targetResourceName) - $($failedOperation.properties.statusMessage.error.message)`n"
+    }
+    Write-Error $errorMsg
+}
 
 $elapsedTime = $(Get-Date) - $startTime
 $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
 Write-Output "Deployment ($deploymentName) $($deployment.ProvisioningState). ($totalTime elapsed)"
-
