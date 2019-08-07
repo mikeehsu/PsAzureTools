@@ -37,7 +37,6 @@ Assign the IP addresses from the PrimaryVms to the Recovery VMs
 
 .EXAMPLE
 .\CreateSiteRecovery.ps1 -RecoveryVaultResourceGroupName 'asr-vault-rg' -RecoveryVaultName 'asr-vault' -PrimaryResourceGroupName 'myproject-rg' -PrimaryVnetResourceGroupName 'vnet-east-rg' -PrimaryVnetName 'vnet-east' -RecoveryResourceGroupName 'myproject-dr-rg' -RecoveryLocation 'westus' -RecoveryVnetResourceGroupName 'vnet-west-rg' -RecoveryVnetName 'vnet-east'
-. .\CreateSiteRecovery.ps1  -RecoveryVaultResourceGroupName 'asr-test-vault' -RecoveryVaultName 'asr-test-vault' -PrimaryResourceGroupName 'asr-test-va' -PrimaryVnetResourceGroupName 'asr-test-va-vnet' -PrimaryVnetName asr-test-vnet-va -RecoveryResourceGroupName 'asr-test-az' -RecoveryLocation 'usgovarizona' -RecoveryVnetResourceGroupName 'asr-test-az-vnet' -RecoveryVnetName 'asr-test-vnet-az' -KeepPrimaryIPAddress $true
 #>
 
 [CmdletBinding()]
