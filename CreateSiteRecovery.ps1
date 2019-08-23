@@ -95,6 +95,7 @@ function Get-AsrCacheStorageAccount {
     $cacheName = (('asr' + $RecoveryVaultName) -replace '[^a-zA-Z0-9]', '').ToLower()[0..19] -join ''
     $storageAccount = Get-AzStorageAccount -ResourceGroupName $RecoveryVaultResourceGroupName -ErrorAction SilentlyContinue | Where-Object {$_.StorageAccountName -like "$cacheName*"}
     if ($storageAccount) {
+        Write-Verbose "CacheStorageAccount ($($storageAccount.StorageAccountName)) found"
         return $storageAccount
     }
 
@@ -102,6 +103,7 @@ function Get-AsrCacheStorageAccount {
     try {
         Write-Progress -Activity "Creating Cache Storage Account ($storageAccountName)..."
         $storageAccount = New-AzStorageAccount -ResourceGroupName $RecoveryVaultResourceGroupName -Name $storageAccountName -Location $Location -SKU 'Standard_LRS' -ErrorAction 'Stop'
+        Write-Verbose "CacheStorageAccount ($($storageAccount.StorageAccountName)) created"
     } catch {
         Write-Error "Error creating StorageAccount for local cache - $($_.Exception)" -ErrorAction Stop
         return $null
@@ -430,7 +432,6 @@ if ($recoveryVms) {
 # get current protection status
 $protectedItems = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $primaryProtectionContainer
 
-$vmCount = 0
 $protectedVmNames = @()
 $protectionJobs = @()
 foreach ($vm in $vms) {
@@ -450,8 +451,20 @@ foreach ($vm in $vms) {
     $avSetId = $null
     if ($vm.AvailabilitySetReference.id) {
         $avSetIdParts = $vm.AvailabilitySetReference.id -split '/'
-        $avSetIdParts[4] = 'asr-test-az'
-        $avSetId = $avSetIdParts -join '/'
+
+        try {
+            $sourceAvSet = Get-AzAvailabilitySet -ResourceGroupName $avSetIdParts[4] -Name $avSetIdParts[-1] -ErrorAction Stop
+            $destAvSet = Get-AzAvailabilitySet -ResourceGroupName $RecoveryResourceGroupName -Name $avSetIdParts[-1] -ErrorAction SilentlyContinue
+            if (-not $destAvSet) {
+                $null = New-AzAvailabilitySet -ResourceGroupName $RecoveryResourceGroupName -Name $avSetIdParts[-1] -Location $RecoveryLocation `
+                    -Sku $sourceAvSet.Sku `
+                    -PlatformFaultDomainCount $sourceAvSet.PlatformFaultDomainCount `
+                    -PlatformUpdateDomainCount $sourceAvSet.PlatformUpdateDomainCount
+            }
+        } catch {
+            Write-Error "Error creating AvailabilitySet - $($_.Exception)" -ErrorAction Stop
+            continue
+        }
     }
 
     Write-Progress -Activity "Protecting Virtual Machine $($vm.Name)..."
@@ -465,7 +478,7 @@ foreach ($vm in $vms) {
 
 #            -RecoveryAzureStorageAccountId $recoveryCacheStorageAccount.Id `
 
-$diskConfigs += New-AzRecoveryServicesAsrAzureToAzureDiskReplicationConfig -ManagedDisk `
+    $diskConfigs += New-AzRecoveryServicesAsrAzureToAzureDiskReplicationConfig -ManagedDisk `
         -LogStorageAccountId $primaryCacheStorageAccount.Id `
         -DiskId $diskId `
         -RecoveryResourceGroupId  $recoveryResourceGroup.ResourceId `
@@ -530,6 +543,7 @@ do {
 
         if (-not $protectedItem) {
             $statusMsg += "$($vm.Name) (Failed)"
+            Write-Warning "$($vm.Name) VM replication failed."
             $vmsToUpdate.Remove($vm.Name)
 
         } elseif ($protectedItem.ProtectionState -eq "Protected") {
@@ -565,4 +579,4 @@ do {
 
 $elapsedTime = $(Get-Date) - $startTime
 $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
-Write-Output "$vmCount protection jobs complete. ($totalTime elapsed)"
+Write-Output "Protection jobs complete. ($totalTime elapsed)"
