@@ -51,10 +51,10 @@ Param(
     [parameter(Mandatory=$True)]
     [string] $PrimaryResourceGroupName,
 
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory=$False)]
     [string] $PrimaryVnetResourceGroupName,
 
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory=$False)]
     [string] $PrimaryVnetName,
 
     [parameter(Mandatory=$False)]
@@ -66,10 +66,10 @@ Param(
     [parameter(Mandatory=$True)]
     [string] $RecoveryLocation,
 
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory=$False)]
     [string] $RecoveryVnetResourceGroupName,
 
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory=$False)]
     [string] $RecoveryVnetName,
 
     [parameter(Mandatory=$False)]
@@ -112,117 +112,25 @@ function Get-AsrCacheStorageAccount {
 }
 
 #######################################################################
-function Get-BearerToken()
-{
-    $ErrorActionPreference = 'Stop'
-
-    if(-not (Get-Module Az.Accounts)) {
-        Import-Module Az.Accounts
-    }
-    $azProfile = [Microsoft.Azure.Commands.Common.Authentication.Abstractions.AzureRmProfileProvider]::Instance.Profile
-    if(-not $azProfile.Accounts.Count) {
-        Write-Error "Ensure you have logged in before calling this function."
-    }
-
-    $currentAzureContext = Get-AzContext
-    $profileClient = New-Object Microsoft.Azure.Commands.ResourceManager.Common.RMProfileClient($azProfile)
-    Write-Debug ("Getting access token for tenant" + $currentAzureContext.Tenant.TenantId)
-    $token = $profileClient.AcquireAccessToken($currentAzureContext.Tenant.TenantId)
-    return ('Bearer ' + $token.AccessToken)
-}
-
-#######################################################################
-function Set-ProtectedItemNic
-{
-    Param (
-        [parameter(Mandatory=$True)]
-        $ProtectedItem,
-
-        [parameter(Mandatory=$False)]
-        [string] $NicId,
-
-        [parameter(Mandatory=$False)]
-        [string] $RecoveryVMSubnetName,
-
-        [parameter(Mandatory=$False)]
-        [string] $RecoveryNicStaticIPAddress
-    )
-
-    # validate NicId
-    if (-not $NicId) {
-        if ($ProtectedItem.NicDetailsList.Count -eq 1) {
-            $NicId = $ProtectedItem.NicDetailsList[0].NicId
-        } else {
-            Write-Error 'Must Specify NicId for multi-NIC VM' -ErrorAction Stop
-            return
-        }
-    }
-
-    $nic = $ProtectedItem.NicDetailsList | Where-Object {$_.NicId -eq $NicId}
-
-    if ($RecoveryVMSubnetName) {
-        $nic.RecoveryVMSubnetName = $RecoveryVMSubnetName
-    }
-
-    if ($RecoveryNicStaticIPAddress) {
-        $nic.RecoveryNicIpAddressType = 'Static'
-        $nic.ReplicaNicStaticIPAddress = $RecoveryNicStaticIPAddress
-    }
-
-    $environment = (Get-AzContext).Environment
-
-    $baseUri = (Get-AzEnvironment -Name $environment).ResourceManagerUrl
-    $baseUri = $baseUri.Substring(0, $baseUri.length-1)
-    $suffixUri = '?api-version=2018-07-10'
-
-    $uri = $baseUri + $ProtectedItem.Id + $suffixUri
-
-    $token = Get-BearerToken
-    $nics = @()
-    $nics += $nic
-    $body = @{
-        properties = @{
-            selectedRecoveryAzureNetworkId = $nic.RecoveryVMNetworkId
-            vmNics = $nics
-            providerSpecificDetails = @{
-                instanceType = 'A2A'
-            }
-        }
-    } | ConvertTo-Json -Depth 100
-
-    $params = @{
-        ContentType = 'application/json'
-        Headers = @{
-                'authorization' = $token
-        }
-        Method = 'PATCH'
-        URI = $uri
-        Body = $body
-    }
-
-    try {
-        $response = Invoke-RestMethod @params
-    } catch {
-        Write-Error "Error Setting NIC - $response - $($_.Exception)" -ErrorAction Stop
-    }
-}
-
-#######################################################################
 function Wait-AsrJob {
     Param (
         [parameter(Mandatory=$True)]
         $AsrJob,
 
         [parameter(Mandatory=$False)]
-        [string] $Message
+        [string] $Message,
+
+        [parameter(Mandatory=$False)]
+        [int] $Seconds = 10
     )
 
     while (($AsrJob.State -eq "InProgress") -or ($AsrJob.State -eq "NotStarted")) {
         if ($Message) {
             Write-Progress -Activity "$Message" -Status "Processing...$($AsrJob.DisplayName)"
         }
-        Start-Sleep 10;
+        Start-Sleep -Seconds $Seconds
         $AsrJob = Get-ASRJob -Job $AsrJob
+        Write-Verbose "Waiting on Job: $($AsrJob.TargetObjectName) - $($AsrJob.State)"
     }
 }
 
@@ -241,15 +149,50 @@ $primaryProtectionContainerName = ('A2AP-' + $PrimaryResourceGroupName)[0..44] -
 $recoveryProtectionContainerName = ('A2AR-' + $recoveryResourceGroupName)[0..44] -join ''
 
 $primaryProtectionContainerMappingName = ('A2AP-' + $PrimaryResourceGroupName)[0..44] -join ''
-# $recoveryProtectionContainerMappingName = ('A2AR-' + $recoveryResourceGroupName)[0..44] -join ''
+$recoveryProtectionContainerMappingName = ('A2AR-' + $recoveryResourceGroupName)[0..44] -join ''
 
 $policyName = ('A2A-' + $PrimaryResourceGroupName)[0..44] -join ''
 
 $primaryNetworkMappingName = ('A2AP-' + $PrimaryResourceGroupName)[0..44] -join ''
 $recoveryNetworkMappingName = ('A2AR-' + $recoveryResourceGroupName)[0..44] -join ''
 
-# validate read-only items exists
 # make sure virtual networks exist
+if ($NetworkMappingFile) {
+    if ($PrimaryVnetResourceGroupName -or $PrimaryVnetName -or
+        $RecoveryVnetResourceGroupName -or $RecoveryVnetName) {
+        Write-Error "-NetworkMappingFile cannot be combined with -PrimaryVnetResourceGroupName, -PrimaryVnetName, -RecoveryVnetResourceGroupName or -RecoveryVnetName" -ErrorAction Stop
+    }
+
+    $networkMappingItems = Import-Csv $NetworkMappingFile
+
+    $vnetMap = ($networkMappingItems | Where-Object { $_.SourceResourceId -match "/virtualNetworks/[a-zA-Z0-9_.-]+$" })[0]
+    if ($vnetMap) {
+        $PrimaryVnetResourceGroupName = ($vnetMap.SourceResourceId -split '/')[4]
+        $PrimaryVnetName = ($vnetMap.SourceResourceId -split '/')[-1]
+        $RecoveryVnetResourceGroupName = ($vnetMap.DestinationResourceId -split '/')[4]
+        $RecoveryVnetName = ($vnetMap.DestinationResourceId -split '/')[-1]
+    } else {
+        Write-Warning "No virtual network map provided in $($NetworkMappingFile)" -ErrorAction SilentlyContinue
+    }
+}
+
+if (-not $PrimaryVnetResourceGroupName) {
+    Write-Error "-PrimaryVnetResourceGroupName or -NetworkMappingFile must be provided." -ErrorAction Stop
+}
+
+if (-not $PrimaryVnetName) {
+    Write-Error "-PrimaryVnetName or -NetworkMappingFile must be provided." -ErrorAction Stop
+}
+
+if (-not $RecoveryVnetResourceGroupName) {
+    Write-Error "-RecoveryVnetResourceGroupName or -NetworkMappingFile must be provided." -ErrorAction Stop
+}
+
+if (-not $RecoveryVnetName) {
+    Write-Error "-RecoveryVnetName or -NetworkMappingFile must be provided." -ErrorAction Stop
+}
+
+# get networks
 $primaryVnet = Get-AzVirtualNetwork -ResourceGroupName $PrimaryVnetResourceGroupName -Name $PrimaryVnetName -ErrorAction SilentlyContinue
 if (-not $primaryVnet) {
     Write-Error "Error retrieving virtual network $PrimaryVnetResourceGroupName/$PrimaryVnetName - $($_.Exception)" -ErrorAction Stop
@@ -261,7 +204,10 @@ if (-not $recoveryVnet) {
 }
 
 # make sure Vault ResourceGroup exists
-$null = New-AzResourceGroup -Name $RecoveryVaultResourceGroupName -Location $RecoveryLocation -Force -ErrorAction Stop
+$vaultResourceGroup = Get-AzResourceGroup -Name $RecoveryVaultResourceGroupName -ErrorAction SilentlyContinue
+if (-not $vaultResourceGroup) {
+    $vaultResourceGroup = New-AzResourceGroup -Name $RecoveryVaultResourceGroupName -Location $RecoveryLocation -Force -ErrorAction Stop
+}
 
 # make sure RecoveryResourceGroup exists
 $primaryResourceGroup = Get-AzResourceGroup -Name $primaryResourceGroupName -ErrorAction Stop
@@ -271,11 +217,7 @@ if (-not $recoveryResourceGroup) {
     $recoveryResourceGroup = New-AzResourceGroup -Name $recoveryResourceGroupName -Location $RecoveryLocation -Force -ErrorAction Stop
 }
 
-if ($NetworkMappingFile) {
-    $networkMappingItems = Import-Csv $NetworkMappingFile
-}
-
-##### start processing #####
+##### START PROCESSING #####
 
 #Create Cache storage account for replication logs in the primary region
 $primaryCacheStorageAccount = Get-AsrCacheStorageAccount -RecoveryVaultResourceGroupName $RecoveryVaultResourceGroupName -RecoveryVaultName $RecoveryVaultName -Location $primaryResourceGroup.Location -ErrorAction 'Stop'
@@ -361,7 +303,7 @@ try {
 
 #Create Protection container mapping between the Primary and Recovery Protection Containers with the Replication policy
 try {
-    $primaryProtectionContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $primaryProtectionContainer
+    $primaryProtectionContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $primaryProtectionContainer | Where-Object {$_.Name -eq $primaryProtectionContainerMappingName}
     if (-not $primaryProtectionContainerMapping) {
         $asrJob = New-AzRecoveryServicesAsrProtectionContainerMapping -Name $primaryProtectionContainerMappingName -Policy $policy -PrimaryProtectionContainer $primaryProtectionContainer -RecoveryProtectionContainer $recoveryProtectionContainer
         Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container Mapping ($primaryProtectionContainerMappingName)..."
@@ -373,20 +315,19 @@ try {
     Write-Error "Error creating Protection Container Mapping ($primaryProtectionContainerMappingName) - $($_.Exception)" -ErrorAction Stop
 }
 
-# #Create Protection container mapping (for failback) between the Recovery and Primary Protection Containers with the Replication policy
-# try {
-#     $recoveryProtectionContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $recoveryProtectionContainer
-#     if (-not $recoveryProtectionContainerMapping) {
-#         $asrJob = New-AzRecoveryServicesAsrProtectionContainerMapping -Name $recoveryProtectionContainerMappingName -Policy $policy -PrimaryProtectionContainer $recoveryProtectionContainer -RecoveryProtectionContainer $primaryProtectionContainer
-#         Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container Mapping ($recoveryProtectionContainerMappingName)..."
-#         Write-Verbose "Protection Container Mapping ($recoveryProtectionContainerMappingName) created"
+#Create Protection container mapping (for failback) between the Recovery and Primary Protection Containers with the Replication policy
+try {
+    $recoveryProtectionContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $recoveryProtectionContainer | Where-Object {$_.Name -eq $recoveryProtectionContainerMappingName}
+    if (-not $recoveryProtectionContainerMapping) {
+        $asrJob = New-AzRecoveryServicesAsrProtectionContainerMapping -Name $recoveryProtectionContainerMappingName -Policy $policy -PrimaryProtectionContainer $recoveryProtectionContainer -RecoveryProtectionContainer $primaryProtectionContainer
+        Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container Mapping ($recoveryProtectionContainerMappingName)..."
+        Write-Verbose "Protection Container Mapping ($recoveryProtectionContainerMappingName) created"
 
-#         $recoveryProtectionContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $recoveryProtectionContainer
-#     }
-# } catch {
-#     Write-Error "Error creating Protection Container Mapping ($recoveryContainerMappingName) - $($_.Exception)" -ErrorAction Stop
-# }
-
+        $recoveryProtectionContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $recoveryProtectionContainer
+    }
+} catch {
+    Write-Error "Error creating Protection Container Mapping ($recoveryContainerMappingName) - $($_.Exception)" -ErrorAction Stop
+}
 
 # Create an ASR network mapping between the primary Azure virtual network and the recovery Azure virtual network
 try {
@@ -399,8 +340,7 @@ try {
         -Name $primaryNetworkMappingName `
         -PrimaryFabric $primaryFabric   -PrimaryAzureNetworkId $primaryVnet.Id `
         -RecoveryFabric $recoveryFabric -RecoveryAzureNetworkId $recoveryVnet.Id
-    Wait-AsrJob -AsrJob $asrJob -Message "Creating Network Mapping ($primaryNetworkMappingName)..."
-    Write-Verbose "Network Mapping ($primaryNetworkMappingName) created"
+    Write-Verbose "Network Mapping ($primaryNetworkMappingName) started"
 } catch {
     Write-Error "Error creating Network Mapping ($primaryNetworkMappingName) - $($_.Exception)" -ErrorAction Stop
 }
@@ -416,8 +356,7 @@ try {
         -Name $recoveryNetworkMappingName `
         -PrimaryFabric $recoveryFabric -PrimaryAzureNetworkId $recoveryVnet.Id `
         -RecoveryFabric $primaryFabric -RecoveryAzureNetworkId $primaryVnet.Id
-    Wait-AsrJob -AsrJob $asrJob -Message "Creating Network Mapping ($recoveryNetworkMappingName)... "
-    Write-Verbose "Network Mapping ($recoveryNetworkMappingName) created"
+    Write-Verbose "Network Mapping ($recoveryNetworkMappingName) started"
 } catch {
     Write-Error "Error creating Network Mapping - $($_.Exception)" -ErrorAction Stop
 }
@@ -529,11 +468,11 @@ foreach ($vm in $vms) {
 # wait for protection jobs
 $message = $protectedVmNames -join ', '
 foreach ($protectionJob in $protectionJobs) {
-    Wait-AsrJob -AsrJob $protectionJob -Message "Waiting for Protection jobs ($message)..."
+    Wait-AsrJob -AsrJob $protectionJob -Message "Preparing VMs for replication ($message)..." -Seconds 30
 }
 
 # waiting for synchronization
-[System.Collections.ArrayList] $vmsToUpdate = $vms.Name
+[System.Collections.ArrayList] $vmsToUpdate = $($vms.Name)
 do {
     $statusMsg = @()
 
@@ -541,24 +480,55 @@ do {
     foreach ($vm in $vms) {
         $protectedItem = $protectedItems | Where-Object {$_.RecoveryAzureVMName -eq $vm.Name}
 
-        if (-not $protectedItem) {
+        if (-not $protectedItem -or $protectedItem.ProtectionState -like "*Failed*") {
             $statusMsg += "$($vm.Name) (Failed)"
             Write-Warning "$($vm.Name) VM replication failed."
             $vmsToUpdate.Remove($vm.Name)
 
         } elseif ($protectedItem.ProtectionState -eq "Protected") {
+            # update settings on the VM after synch is complete
+
             if ($vmsToUpdate -contains $vm.Name) {
                 Write-Output "$($vm.Name) synchronized"
-                if ($KeepPrimaryIPAddress) {
-                    $nic = $protectedItem.NicDetailsList[0]
-                    $subnetMap = $networkMappingItems | Where-Object {$_.SourceResourceId -like "*/$($nic.VMNetworkName)/subnets/$($nic.VMSubnetName)"}
+                $nic = $protectedItem.NicDetailsList[0]
+
+                if ($networkMappingItems) {
+                    $subnetMap = $networkMappingItems | Where-Object {$_.SourceResourceId -like "$($nic.VMNetworkName)/subnets/$($nic.VMSubnetName)"}
+                    $vnetId = ($subnetMap.DestinationResourceId -split '/')[0..8] -join '/'
                     $subnetName = ($subnetMap.DestinationResourceId -split '/')[-1]
 
-                    # using Set-AzRecoveryServicesAsrReplicationProtectedItem to set the static IP didn't work -- using REST API instead
-                    Set-ProtectedItemNic -ProtectedItem $protectedItem -RecoveryVMSubnetName $subnetName -RecoveryNicStaticIPAddress $nic.PrimaryNicStaticIPAddress
-
-                    Write-Verbose "$($vm.Name) IP set to $($nic.PrimaryNicStaticIPAddress)"
+                    if (-not $subnetMap) {
+                        $vnetId = $recoveryVnet.Id
+                    }
                 }
+
+                $params = @{
+                    PrimaryNic = $nic.NicId
+                    RecoveryNetworkId = $vnetId
+                }
+
+                if ($subnetName) {
+                    $params += @{ RecoveryNicSubnetName = $subnetName }
+                }
+
+                # update static IP
+                if ($KeepPrimaryIPAddress) {
+                    $params += @{ RecoveryNicStaticIPAddress = $nic.PrimaryNicStaticIPAddress }
+                }
+
+                # update available set
+                if ($vm.AvailabilitySetReference.Id) {
+                    $avSetIdParts = $vm.AvailabilitySetReference.Id -split '/'
+                    $avSetIdParts[4] = $RecoveryResourceGroupName
+                    $avSetId = $avSetIdParts -join '/'
+
+                    $params += @{RecoveryAvailabilitySet = $avSetId}
+                }
+
+                $asrJob = $protectedItem | Set-AzRecoveryServicesAsrReplicationProtectedItem @params
+                Wait-AsrJob -AsrJob $asrJob -Message "Updating protected item $($protectedItem.FriendlyName)..."
+
+                Write-Verbose "$($vm.Name) updated: $($params.values -join ',')"
                 $vmsToUpdate.Remove($vm.Name)
             }
 
