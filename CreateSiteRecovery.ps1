@@ -42,45 +42,45 @@ Assign the IP addresses from the PrimaryVms to the Recovery VMs
 [CmdletBinding()]
 
 Param(
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory = $True)]
     [string] $RecoveryVaultResourceGroupName,
 
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory = $True)]
     [string] $RecoveryVaultName,
 
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory = $True)]
     [string] $PrimaryResourceGroupName,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [string] $PrimaryVnetResourceGroupName,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [string] $PrimaryVnetName,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [array] $PrimaryVmNames,
 
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory = $True)]
     [string] $RecoveryResourceGroupName,
 
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory = $False)]
     [string] $RecoveryLocation,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [string] $RecoveryVnetResourceGroupName,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [string] $RecoveryVnetName,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [boolean] $KeepPrimaryIPAddress,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [string] $NetworkMappingFile
 )
 
 #######################################################################
-function Get-AsrCacheStorageAccount {
+function Get-LocalAsrCacheStorageAccount {
     Param (
         [parameter(Mandatory = $True)]
         [string] $RecoveryVaultResourceGroupName,
@@ -93,18 +93,19 @@ function Get-AsrCacheStorageAccount {
     )
 
     $cacheName = (('asr' + $RecoveryVaultName) -replace '[^a-zA-Z0-9]', '').ToLower()[0..19] -join ''
-    $storageAccount = Get-AzStorageAccount -ResourceGroupName $RecoveryVaultResourceGroupName -ErrorAction SilentlyContinue | Where-Object {$_.StorageAccountName -like "$cacheName*"}
+    $storageAccount = Get-AzStorageAccount -ResourceGroupName $RecoveryVaultResourceGroupName -ErrorAction SilentlyContinue | Where-Object { $_.StorageAccountName -like "$cacheName*" }
     if ($storageAccount) {
         Write-Verbose "CacheStorageAccount ($($storageAccount.StorageAccountName)) found"
         return $storageAccount
     }
 
-    $storageAccountName = ($cacheName + $(New-Guid).Guid -replace '[^a-zA-Z0-9]').Substring(0,24).ToLower()
+    $storageAccountName = ($cacheName + $(New-Guid).Guid -replace '[^a-zA-Z0-9]').Substring(0, 24).ToLower()
     try {
         Write-Progress -Activity "Creating Cache Storage Account ($storageAccountName)..."
         $storageAccount = New-AzStorageAccount -ResourceGroupName $RecoveryVaultResourceGroupName -Name $storageAccountName -Location $Location -SKU 'Standard_LRS' -ErrorAction 'Stop'
         Write-Verbose "CacheStorageAccount ($($storageAccount.StorageAccountName)) created"
-    } catch {
+    }
+    catch {
         Write-Error "Error creating StorageAccount for local cache - $($_.Exception)" -ErrorAction Stop
         return $null
     }
@@ -112,15 +113,69 @@ function Get-AsrCacheStorageAccount {
 }
 
 #######################################################################
+function Get-LocalAsrContainer {
+
+    Param (
+        [Parameter(Mandatory = $True)]
+        [string] $Location
+    )
+
+    $containerName = "asr-a2a-default-$location-container"[0..44] -join ''
+
+    try {
+        $fabric = Get-LocalAsrFabric -Location $Location
+
+        $container = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric -Name $containerName -ErrorAction SilentlyContinue
+        if (-not $container) {
+            $asrJob = New-AzRecoveryServicesAsrProtectionContainer -InputObject $fabric -Name $containerName -ErrorAction Stop
+            Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container ($containerName)..."
+            $container = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric -Name $containerName -ErrorAction SilentlyContinue
+            Write-Verbose "Protection Container ($containerName) created"
+        }
+    }
+    catch {
+        Write-Error "Error creating Protection Container ($containerName) - $($_.Exception)" -ErrorAction Stop
+    }
+
+    return $container
+}
+
+#######################################################################
+function Get-LocalAsrFabric {
+
+    Param (
+        [Parameter(Mandatory = $True)]
+        [string] $Location
+    )
+
+    $fabricName = "asr-a2a-default-$location"[0..44] -join ''
+
+    try {
+        $fabric = Get-AzRecoveryServicesAsrFabric -Name $fabricName -ErrorAction SilentlyContinue
+        if (-not $fabric) {
+            $asrJob = New-AzRecoveryServicesAsrFabric -Azure -Location $Location -Name $fabricName -ErrorAction Stop
+            Wait-AsrJob -AsrJob $asrJob -Message "Creating Recovery Service Fabric ($fabricName)..."
+            $fabric = Get-AzRecoveryServicesAsrFabric -Name $fabricName -ErrorAction Stop
+            Write-Verbose "Recovery Service Fabric ($fabricName) created"
+        }
+    }
+    catch {
+        Write-Error "Error creating Fabric ($fabricName) - $($_.Exception)" -ErrorAction Stop
+    }
+
+    return $fabric
+}
+
+#######################################################################
 function Wait-AsrJob {
     Param (
-        [parameter(Mandatory=$True)]
+        [parameter(Mandatory = $True)]
         $AsrJob,
 
-        [parameter(Mandatory=$False)]
+        [parameter(Mandatory = $False)]
         [string] $Message,
 
-        [parameter(Mandatory=$False)]
+        [parameter(Mandatory = $False)]
         [int] $Seconds = 10
     )
 
@@ -141,21 +196,6 @@ $startTime = Get-Date
 
 ##### validate parameters #####
 
-# initialize ASR names
-$primaryFabricName = ('A2AP-' + $PrimaryResourceGroupName)[0..44] -join ''
-$recoveryFabricName = ('A2AR-' + $recoveryResourceGroupName)[0..44] -join ''
-
-$primaryProtectionContainerName = ('A2AP-' + $PrimaryResourceGroupName)[0..44] -join ''
-$recoveryProtectionContainerName = ('A2AR-' + $recoveryResourceGroupName)[0..44] -join ''
-
-$primaryProtectionContainerMappingName = ('A2AP-' + $PrimaryResourceGroupName)[0..44] -join ''
-$recoveryProtectionContainerMappingName = ('A2AR-' + $recoveryResourceGroupName)[0..44] -join ''
-
-$policyName = ('A2A-' + $PrimaryResourceGroupName)[0..44] -join ''
-
-$primaryNetworkMappingName = ('A2AP-' + $PrimaryResourceGroupName)[0..44] -join ''
-$recoveryNetworkMappingName = ('A2AR-' + $recoveryResourceGroupName)[0..44] -join ''
-
 # make sure virtual networks exist
 if ($NetworkMappingFile) {
     if ($PrimaryVnetResourceGroupName -or $PrimaryVnetName -or
@@ -171,7 +211,8 @@ if ($NetworkMappingFile) {
         $PrimaryVnetName = ($vnetMap.SourceResourceId -split '/')[-1]
         $RecoveryVnetResourceGroupName = ($vnetMap.DestinationResourceId -split '/')[4]
         $RecoveryVnetName = ($vnetMap.DestinationResourceId -split '/')[-1]
-    } else {
+    }
+    else {
         Write-Warning "No virtual network map provided in $($NetworkMappingFile)" -ErrorAction SilentlyContinue
     }
 }
@@ -212,16 +253,33 @@ if (-not $vaultResourceGroup) {
 # make sure RecoveryResourceGroup exists
 $primaryResourceGroup = Get-AzResourceGroup -Name $primaryResourceGroupName -ErrorAction Stop
 
-$recoveryResourceGroup = Get-AzResourceGroup -Name $recoveryResourceGroupName -ErrorAction SilentlyContinue
+$recoveryResourceGroup = Get-AzResourceGroup -Name $RecoveryResourceGroupName -ErrorAction SilentlyContinue
 if (-not $recoveryResourceGroup) {
-    $recoveryResourceGroup = New-AzResourceGroup -Name $recoveryResourceGroupName -Location $RecoveryLocation -Force -ErrorAction Stop
+    if ($RecoveryLocation) {
+        $recoveryResourceGroup = New-AzResourceGroup -Name $RecoveryResourceGroupName -Location $RecoveryLocation -Force -ErrorAction Stop
+    }
+    else {
+        Write-Error "-Location required if -RecoveryResourceGroupName ($RecoveryResourceGroupName) does not exist." -ErrorAction Stop
+    }
 }
 
 ##### START PROCESSING #####
+$primaryLocation = $primaryResourceGroup.Location
+$recoveryLocation = $recoveryResourceGroup.Location
+if ($primaryLocation -eq $RecoveryLocation) {
+    Write-Error "-RecoveryVault and/or -RecoveryLocation should be in a region different than -PrimaryResourceGroup ($primaryLocation)" -ErrorAction Stop
+}
 
-#Create Cache storage account for replication logs in the primary region
-$primaryCacheStorageAccount = Get-AsrCacheStorageAccount -RecoveryVaultResourceGroupName $RecoveryVaultResourceGroupName -RecoveryVaultName $RecoveryVaultName -Location $primaryResourceGroup.Location -ErrorAction 'Stop'
-# $recoveryCacheStorageAccount = Get-AsrCacheStorageAccount -RecoveryVaultResourceGroupName $RecoveryVaultResourceGroupName -ResourceGroupName $PrimaryResourceGroupName -Location $primaryResourceGroup.Location -ErrorAction 'Stop'
+
+# initialize ASR names
+$policyName = ("asr-a2a-$PrimaryResourceGroupName")[0..44] -join ''
+
+$primaryContainerMappingName = ("$primaryLocation-$recoveryLocation-A2A-$PrimaryResourceGroupName")[0..44] -join ''
+$recoveryContainerMappingName = ("$recoveryLocation-$primaryLocation-A2A-$PrimaryResourceGroupName")[0..44] -join ''
+
+$primaryNetworkMappingName = ("$PrimaryVnetName-$PrimaryResourceGroupName")[0..44] -join ''
+$recoveryNetworkMappingName = ("$RecoveryVnetName-$RecoveryResourceGroupName")[0..44] -join ''
+
 
 # create vault and set context
 try {
@@ -233,99 +291,63 @@ try {
     }
     $null = Set-ASRVaultContext -Vault $recoveryVault
     $null = Set-AzRecoveryServicesAsrVaultContext -Vault $recoveryVault
-} catch {
+}
+catch {
     Write-Error "Error creating Recovery Vault ($RecoveryVaultName) - $($_.Exception)" -ErrorAction Stop
 }
 
-# create ASR fabric
-try {
-    $primaryFabric = Get-AzRecoveryServicesAsrFabric -Name $primaryFabricName -ErrorAction SilentlyContinue
-    if (-not $primaryFabric) {
-        $asrJob = New-AzRecoveryServicesAsrFabric -Azure -Location $primaryResourceGroup.Location -Name $primaryFabricName -ErrorAction Stop
-        Wait-AsrJob -AsrJob $asrJob -Message "Creating Recovery Service Fabric ($primaryFabricName)..."
-        $primaryFabric = Get-AzRecoveryServicesAsrFabric -Name $primaryFabricName -ErrorAction Stop
-        Write-Verbose "Recovery Service Fabric ($primaryFabricName) created"
-    }
-} catch {
-    Write-Error "Error creating Fabric ($primaryFabricName) - $($_.Exception)" -ErrorAction Stop
-}
-
-try {
-    $recoveryFabric = Get-AzRecoveryServicesAsrFabric -Name $recoveryFabricName -ErrorAction SilentlyContinue
-    if (-not $recoveryFabric) {
-        $asrJob = New-AzRecoveryServicesAsrFabric -Azure -Location $RecoveryLocation -Name $recoveryFabricName
-        Wait-AsrJob -AsrJob $asrJob -Message "Creating Recovery Service Fabric ($recoveryFabricName)..."
-        $recoveryFabric = Get-AzRecoveryServicesAsrFabric -Name $recoveryFabricName -ErrorAction Stop
-        Write-Verbose "Recovery Service Fabric ($recoveryFabricName) created"
-    }
-} catch {
-    Write-Error "Error creating Fabric ($recoveryFabricName) - $($_.Exception)" -ErrorAction Stop
-}
-
-
-#Create a Protection container in the source Azure region (within the Primary fabric)
-try {
-    $primaryProtectionContainer = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $primaryFabric -Name $primaryProtectionContainerName -ErrorAction SilentlyContinue
-    if (-not $primaryProtectionContainer) {
-        $asrJob = New-AzRecoveryServicesAsrProtectionContainer -InputObject $primaryFabric -Name $primaryProtectionContainerName -ErrorAction Stop
-        Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container ($primaryProtectionContainerName)..."
-        $primaryProtectionContainer = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $primaryFabric -Name $primaryProtectionContainerName -ErrorAction SilentlyContinue
-        Write-Verbose "Protection Container ($primaryProtectionContainerName) created"
-    }
-} catch {
-    Write-Error "Error creating Protection Container ($primaryProtectionContainerName) - $($_.Exception)" -ErrorAction Stop
-}
-
-try {
-    $recoveryProtectionContainer =  Get-AzRecoveryServicesAsrProtectionContainer -Fabric $recoveryFabric -Name $recoveryProtectionContainerName -ErrorAction SilentlyContinue
-    if (-not $recoveryProtectionContainer) {
-        $asrJob = New-AzRecoveryServicesAsrProtectionContainer -InputObject $recoveryFabric -Name $recoveryProtectionContainerName -ErrorAction SilentlyContinue
-        Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container ($recoveryProtectionContainerName)..."
-        $recoveryProtectionContainer = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $recoveryFabric -Name $recoveryProtectionContainerName -ErrorAction Stop
-        Write-Verbose "Protection Container ($recoveryProtectionContainerName) created"
-    }
-} catch {
-    Write-Error "Error creating Protection Container ($recoveryProtectionContainerName) - $($_.Exception)" -ErrorAction Stop
-}
+#Create Cache storage account for replication logs in the primary region
+$primaryCacheStorageAccount = Get-LocalAsrCacheStorageAccount -RecoveryVaultResourceGroupName $RecoveryVaultResourceGroupName -RecoveryVaultName $RecoveryVaultName -Location $primaryResourceGroup.Location -ErrorAction 'Stop'
 
 #Create replication policy
 try {
-    $policy =  Get-AzRecoveryServicesAsrPolicy -Name $policyName -ErrorAction SilentlyContinue
+    $policy = Get-AzRecoveryServicesAsrPolicy -Name $policyName -ErrorAction SilentlyContinue
     if (-not $policy) {
         $asrJob = New-AzRecoveryServicesAsrPolicy -AzureToAzure -Name $policyName -RecoveryPointRetentionInHours 24 -ApplicationConsistentSnapshotFrequencyInHours 4 -ErrorAction Stop
-        Wait-AsrJob -AsrJob $asrJob -Message "Creating Recovery Policy ($policyName)..."
+        Wait-AsrJob -AsrJob $asrJob -Message "Creating Replication Policy ($policyName)..."
         $policy = Get-AzRecoveryServicesAsrPolicy -Name $policyName -ErrorAction Stop
-        Write-Verbose "Recovery Policy ($policyName) created"
+        Write-Verbose "Replication Policy ($policyName) created"
     }
-} catch {
+}
+catch {
     Write-Error "Error creating Policy - $($_.Exception)" -ErrorAction Stop
 }
 
-#Create Protection container mapping between the Primary and Recovery Protection Containers with the Replication policy
-try {
-    $primaryProtectionContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $primaryProtectionContainer | Where-Object {$_.Name -eq $primaryProtectionContainerMappingName}
-    if (-not $primaryProtectionContainerMapping) {
-        $asrJob = New-AzRecoveryServicesAsrProtectionContainerMapping -Name $primaryProtectionContainerMappingName -Policy $policy -PrimaryProtectionContainer $primaryProtectionContainer -RecoveryProtectionContainer $recoveryProtectionContainer
-        Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container Mapping ($primaryProtectionContainerMappingName)..."
-        Write-Verbose "Protection Container Mapping ($primaryProtectionContainerMappingName) created"
+# create fabric
+$primaryFabric = Get-LocalAsrFabric -Location $primaryLocation
+$recoveryFabric = Get-LocalAsrFabric -Location $recoveryLocation
 
-        $primaryProtectionContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $primaryProtectionContainer
+# create protection containers
+$primaryContainer = Get-LocalAsrContainer -Location $primaryLocation
+$recoveryContainer = Get-LocalAsrContainer -Location $recoveryLocation
+
+# create Protection container mapping between the Primary and Recovery Protection Containers with the Replication policy
+try {
+    $primaryContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $primaryContainer -Name $primaryContainerMappingName
+    if (-not $primaryContainerMapping) {
+        $asrJob = New-AzRecoveryServicesAsrProtectionContainerMapping -Name $primaryContainerMappingName -Policy $policy -PrimaryProtectionContainer $primaryContainer -RecoveryProtectionContainer $recoveryContainer
+        Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container Mapping ($primaryContainerMappingName)..."
+        Write-Verbose "Protection Container Mapping ($primaryContainerMappingName) created"
+
+        $primaryContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $primaryContainer -Name -eq $primaryContainerMappingName
     }
-} catch {
-    Write-Error "Error creating Protection Container Mapping ($primaryProtectionContainerMappingName) - $($_.Exception)" -ErrorAction Stop
+}
+catch {
+    Write-Error "Error creating Protection Container Mapping ($primaryContainerMappingName) - $($_.Exception)" -ErrorAction Stop
 }
 
-#Create Protection container mapping (for failback) between the Recovery and Primary Protection Containers with the Replication policy
+# create Protection container mapping (for failback) between the Recovery and Primary Protection Containers with the Replication policy
 try {
-    $recoveryProtectionContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $recoveryProtectionContainer | Where-Object {$_.Name -eq $recoveryProtectionContainerMappingName}
-    if (-not $recoveryProtectionContainerMapping) {
-        $asrJob = New-AzRecoveryServicesAsrProtectionContainerMapping -Name $recoveryProtectionContainerMappingName -Policy $policy -PrimaryProtectionContainer $recoveryProtectionContainer -RecoveryProtectionContainer $primaryProtectionContainer
-        Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container Mapping ($recoveryProtectionContainerMappingName)..."
-        Write-Verbose "Protection Container Mapping ($recoveryProtectionContainerMappingName) created"
+    $recoveryContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $recoveryContainer -Name $recoveryContainerMappingName
+    if (-not $recoveryContainerMapping) {
+        $asrJob = New-AzRecoveryServicesAsrProtectionContainerMapping -Name $recoveryContainerMappingName -Policy $policy -PrimaryProtectionContainer $recoveryContainer -RecoveryProtectionContainer $primaryContainer
+        Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container Mapping ($recoveryContainerMappingName)..."
+        Write-Verbose "Protection Container Mapping ($recoveryContainerMappingName) created"
 
-        $recoveryProtectionContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $recoveryProtectionContainer
+        $recoveryContainerMapping = Get-AzRecoveryServicesAsrProtectionContainerMapping -ProtectionContainer $recoveryContainer -Name $recoveryContainerMappingName
     }
-} catch {
+}
+catch {
     Write-Error "Error creating Protection Container Mapping ($recoveryContainerMappingName) - $($_.Exception)" -ErrorAction Stop
 }
 
@@ -334,7 +356,8 @@ try {
     $networkMapping = Get-AzRecoveryServicesAsrNetworkMapping -PrimaryFabric $primaryFabric
     if ($networkMapping) {
         Write-Output "Primary Network Mapping ($primaryNetworkMappingName) already exists. Please delete to rebuild network mapping."
-    } else {
+    }
+    else {
         $asrJob = New-AzRecoveryServicesAsrNetworkMapping -AzureToAzure `
             -Name $primaryNetworkMappingName `
             -PrimaryFabric $primaryFabric   -PrimaryAzureNetworkId $primaryVnet.Id `
@@ -342,7 +365,8 @@ try {
         Wait-AsrJob -AsrJob $asrJob -Message "Creating Network Mapping ($primaryNetworkMappingName)..."
         Write-Verbose "Network Mapping ($primaryNetworkMappingName) created"
     }
-} catch {
+}
+catch {
     Write-Error "Error creating Network Mapping ($primaryNetworkMappingName) - $($_.Exception)" -ErrorAction Stop
 }
 
@@ -351,27 +375,30 @@ try {
     $networkMapping = Get-AzRecoveryServicesAsrNetworkMapping -PrimaryFabric $recoveryFabric
     if ($networkMapping) {
         Write-Output "Recovery Network Mapping ($recoveryNetworkMappingName) already exists. Please delete to rebuild network mapping."
-    } else {
+    }
+    else {
         $asrJob = New-AzRecoveryServicesAsrNetworkMapping -AzureToAzure `
             -Name $recoveryNetworkMappingName `
             -PrimaryFabric $recoveryFabric -PrimaryAzureNetworkId $recoveryVnet.Id `
             -RecoveryFabric $primaryFabric -RecoveryAzureNetworkId $primaryVnet.Id
-            Wait-AsrJob -AsrJob $asrJob -Message "Creating Network Mapping ($recoveryNetworkMappingName)..."
-            Write-Verbose "Network Mapping ($recoveryNetworkMappingName) created"
+        Wait-AsrJob -AsrJob $asrJob -Message "Creating Network Mapping ($recoveryNetworkMappingName)..."
+        Write-Verbose "Network Mapping ($recoveryNetworkMappingName) created"
     }
-} catch {
+}
+catch {
     Write-Error "Error creating Network Mapping - $($_.Exception)" -ErrorAction Stop
 }
 
 # protect VMs
 if ($recoveryVms) {
     $vms = Get-AzVm -ResourceGroupName $PrimaryResourceGroupName -Status | Where-Object ($PrimaryVmNames -contains $_.Name)
-} else {
+}
+else {
     $vms = Get-AzVm -ResourceGroupName $PrimaryResourceGroupName -Status
 }
 
 # get current protection status
-$protectedItems = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $primaryProtectionContainer
+$protectedItems = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $primaryContainer
 
 $protectedVmNames = @()
 $protectionJobs = @()
@@ -381,7 +408,7 @@ foreach ($vm in $vms) {
         continue
     }
 
-    $protectedItem = $protectedItems | Where-Object {$_.RecoveryAzureVMName -eq $vm.Name}
+    $protectedItem = $protectedItems | Where-Object { $_.RecoveryAzureVMName -eq $vm.Name }
     if ($protectedItem) {
         if ($protectedItem.ProtectionState -eq "Protected" -or $protectedItem.ProtectionState -eq "UnprotectedStatesBegin") {
             Write-Output "$($vm.Name) already being protected. Please delete protected item if you need to restablish protection."
@@ -403,7 +430,8 @@ foreach ($vm in $vms) {
                     -PlatformFaultDomainCount $sourceAvSet.PlatformFaultDomainCount `
                     -PlatformUpdateDomainCount $sourceAvSet.PlatformUpdateDomainCount
             }
-        } catch {
+        }
+        catch {
             Write-Error "Error creating AvailabilitySet - $($_.Exception)" -ErrorAction Stop
             continue
         }
@@ -418,7 +446,7 @@ foreach ($vm in $vms) {
     $disk = Get-AzDisk -ResourceGroupName $resourceIdParts[4] -DiskName $resourceIdParts[8]
     $diskAccountType = $disk.Sku.Tier + '_LRS'
 
-#            -RecoveryAzureStorageAccountId $recoveryCacheStorageAccount.Id `
+    #            -RecoveryAzureStorageAccountId $recoveryCacheStorageAccount.Id `
 
     $diskConfigs += New-AzRecoveryServicesAsrAzureToAzureDiskReplicationConfig -ManagedDisk `
         -LogStorageAccountId $primaryCacheStorageAccount.Id `
@@ -449,16 +477,17 @@ foreach ($vm in $vms) {
             -RecoveryResourceGroupId $recoveryResourceGroup.ResourceId `
             -AzureVmId $vm.Id `
             -Name $vm.Name `
-            -ProtectionContainerMapping $primaryProtectionContainerMapping `
+            -ProtectionContainerMapping $primaryContainerMapping `
             -AzureToAzureDiskReplicationConfiguration $diskconfigs `
             -RecoveryAvailabilitySetId $avSetId `
             -ErrorAction Stop
-    } else {
+    }
+    else {
         $asrJob = New-AzRecoveryServicesAsrReplicationProtectedItem -AzureToAzure `
             -RecoveryResourceGroupId $recoveryResourceGroup.ResourceId `
             -AzureVmId $vm.Id `
             -Name $vm.Name `
-            -ProtectionContainerMapping $primaryProtectionContainerMapping `
+            -ProtectionContainerMapping $primaryContainerMapping `
             -AzureToAzureDiskReplicationConfiguration $diskconfigs `
             -ErrorAction Stop
     }
@@ -479,21 +508,22 @@ foreach ($protectionJob in $protectionJobs) {
 do {
     $statusMsg = @()
 
-    $protectedItems = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $primaryProtectionContainer
+    $protectedItems = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $primaryContainer
     foreach ($vm in $vms) {
         if ($protectedVmNames -notcontains $vm.Name) {
             $vmsToUpdate.Remove($vm.Name)
             continue
         }
 
-        $protectedItem = $protectedItems | Where-Object {$_.RecoveryAzureVMName -eq $vm.Name}
+        $protectedItem = $protectedItems | Where-Object { $_.RecoveryAzureVMName -eq $vm.Name }
 
         if (-not $protectedItem -or $protectedItem.ProtectionState -like "*Failed*") {
             $statusMsg += "$($vm.Name) (Failed)"
             Write-Warning "$($vm.Name) VM replication failed."
             $vmsToUpdate.Remove($vm.Name)
 
-        } elseif ($protectedItem.ProtectionState -eq "Protected") {
+        }
+        elseif ($protectedItem.ProtectionState -eq "Protected") {
             # update settings on the VM after synch is complete
 
             if ($vmsToUpdate -contains $vm.Name) {
@@ -501,7 +531,7 @@ do {
                 $nic = $protectedItem.NicDetailsList[0]
 
                 if ($networkMappingItems) {
-                    $subnetMap = $networkMappingItems | Where-Object {$_.SourceResourceId -like "*/virtualNetworks/$($nic.VMNetworkName)/subnets/$($nic.VMSubnetName)"}
+                    $subnetMap = $networkMappingItems | Where-Object { $_.SourceResourceId -like "*/virtualNetworks/$($nic.VMNetworkName)/subnets/$($nic.VMSubnetName)" }
                     $vnetId = ($subnetMap.DestinationResourceId -split '/')[0..8] -join '/'
                     $subnetName = ($subnetMap.DestinationResourceId -split '/')[-1]
 
@@ -511,7 +541,7 @@ do {
                 }
 
                 $params = @{
-                    PrimaryNic = $nic.NicId
+                    PrimaryNic        = $nic.NicId
                     RecoveryNetworkId = $vnetId
                 }
 
@@ -530,7 +560,7 @@ do {
                     $avSetIdParts[4] = $RecoveryResourceGroupName
                     $avSetId = $avSetIdParts -join '/'
 
-                    $params += @{RecoveryAvailabilitySet = $avSetId}
+                    $params += @{RecoveryAvailabilitySet = $avSetId }
                 }
 
                 $asrJob = $protectedItem | Set-AzRecoveryServicesAsrReplicationProtectedItem @params
@@ -540,14 +570,17 @@ do {
                 $vmsToUpdate.Remove($vm.Name)
             }
 
-        } elseif ($protectedItem.ProtectionState -eq "UnprotectedStatesBegin") {
+        }
+        elseif ($protectedItem.ProtectionState -eq "UnprotectedStatesBegin") {
             $statusMsg += "$($protectedItem.RecoveryAzureVMName)($($protectedItem.ProviderSpecificDetails.MonitoringPercentageCompletion)%)"
 
-        } elseif ($protectedItem.ProtectionState -eq "UnplannedFailoverCommitPendingStatesBegin") {
+        }
+        elseif ($protectedItem.ProtectionState -eq "UnplannedFailoverCommitPendingStatesBegin") {
             Write-Warning "$($vm.Name) undergoing failover, skipped."
             $vmsToUpdate.Remove($vm.Name)
 
-        } else {
+        }
+        else {
             Write-Warning "$($vm.Name) ($($protectedItem.ProtectionState)), skipping"
             $vmsToUpdate.Remove($vm.Name)
         }
