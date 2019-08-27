@@ -333,14 +333,15 @@ try {
 try {
     $networkMapping = Get-AzRecoveryServicesAsrNetworkMapping -PrimaryFabric $primaryFabric
     if ($networkMapping) {
-        $asrJob = Remove-AzRecoveryServicesAsrNetworkMapping -InputObject $networkMapping
-        Wait-AsrJob -AsrJob $asrJob -Message "Removing old Network Mapping ($primaryNetworkMappingName)..."
+        Write-Output "Primary Network Mapping ($primaryNetworkMappingName) already exists. Please delete to rebuild network mapping."
+    } else {
+        $asrJob = New-AzRecoveryServicesAsrNetworkMapping -AzureToAzure `
+            -Name $primaryNetworkMappingName `
+            -PrimaryFabric $primaryFabric   -PrimaryAzureNetworkId $primaryVnet.Id `
+            -RecoveryFabric $recoveryFabric -RecoveryAzureNetworkId $recoveryVnet.Id
+        Wait-AsrJob -AsrJob $asrJob -Message "Creating Network Mapping ($primaryNetworkMappingName)..."
+        Write-Verbose "Network Mapping ($primaryNetworkMappingName) created"
     }
-    $asrJob = New-AzRecoveryServicesAsrNetworkMapping -AzureToAzure `
-        -Name $primaryNetworkMappingName `
-        -PrimaryFabric $primaryFabric   -PrimaryAzureNetworkId $primaryVnet.Id `
-        -RecoveryFabric $recoveryFabric -RecoveryAzureNetworkId $recoveryVnet.Id
-    Write-Verbose "Network Mapping ($primaryNetworkMappingName) started"
 } catch {
     Write-Error "Error creating Network Mapping ($primaryNetworkMappingName) - $($_.Exception)" -ErrorAction Stop
 }
@@ -349,14 +350,15 @@ try {
 try {
     $networkMapping = Get-AzRecoveryServicesAsrNetworkMapping -PrimaryFabric $recoveryFabric
     if ($networkMapping) {
-        $asrJob = Remove-AzRecoveryServicesAsrNetworkMapping -InputObject $networkMapping
-        Wait-AsrJob -AsrJob $asrJob -Message "Removing old Network Mapping ($recoveryNetworkMappingName)..."
+        Write-Output "Recovery Network Mapping ($recoveryNetworkMappingName) already exists. Please delete to rebuild network mapping."
+    } else {
+        $asrJob = New-AzRecoveryServicesAsrNetworkMapping -AzureToAzure `
+            -Name $recoveryNetworkMappingName `
+            -PrimaryFabric $recoveryFabric -PrimaryAzureNetworkId $recoveryVnet.Id `
+            -RecoveryFabric $primaryFabric -RecoveryAzureNetworkId $primaryVnet.Id
+            Wait-AsrJob -AsrJob $asrJob -Message "Creating Network Mapping ($recoveryNetworkMappingName)..."
+            Write-Verbose "Network Mapping ($recoveryNetworkMappingName) created"
     }
-    $asrJob = New-AzRecoveryServicesAsrNetworkMapping -AzureToAzure `
-        -Name $recoveryNetworkMappingName `
-        -PrimaryFabric $recoveryFabric -PrimaryAzureNetworkId $recoveryVnet.Id `
-        -RecoveryFabric $primaryFabric -RecoveryAzureNetworkId $primaryVnet.Id
-    Write-Verbose "Network Mapping ($recoveryNetworkMappingName) started"
 } catch {
     Write-Error "Error creating Network Mapping - $($_.Exception)" -ErrorAction Stop
 }
@@ -383,7 +385,8 @@ foreach ($vm in $vms) {
     if ($protectedItem) {
         if ($protectedItem.ProtectionState -eq "Protected" -or $protectedItem.ProtectionState -eq "UnprotectedStatesBegin") {
             Write-Output "$($vm.Name) already being protected. Please delete protected item if you need to restablish protection."
-                continue
+            $protectedVmNames += $vm.Name
+            continue
         }
     }
 
@@ -478,6 +481,11 @@ do {
 
     $protectedItems = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $primaryProtectionContainer
     foreach ($vm in $vms) {
+        if ($protectedVmNames -notcontains $vm.Name) {
+            $vmsToUpdate.Remove($vm.Name)
+            continue
+        }
+
         $protectedItem = $protectedItems | Where-Object {$_.RecoveryAzureVMName -eq $vm.Name}
 
         if (-not $protectedItem -or $protectedItem.ProtectionState -like "*Failed*") {
@@ -493,7 +501,7 @@ do {
                 $nic = $protectedItem.NicDetailsList[0]
 
                 if ($networkMappingItems) {
-                    $subnetMap = $networkMappingItems | Where-Object {$_.SourceResourceId -like "$($nic.VMNetworkName)/subnets/$($nic.VMSubnetName)"}
+                    $subnetMap = $networkMappingItems | Where-Object {$_.SourceResourceId -like "*/virtualNetworks/$($nic.VMNetworkName)/subnets/$($nic.VMSubnetName)"}
                     $vnetId = ($subnetMap.DestinationResourceId -split '/')[0..8] -join '/'
                     $subnetName = ($subnetMap.DestinationResourceId -split '/')[-1]
 
@@ -535,13 +543,19 @@ do {
         } elseif ($protectedItem.ProtectionState -eq "UnprotectedStatesBegin") {
             $statusMsg += "$($protectedItem.RecoveryAzureVMName)($($protectedItem.ProviderSpecificDetails.MonitoringPercentageCompletion)%)"
 
+        } elseif ($protectedItem.ProtectionState -eq "UnplannedFailoverCommitPendingStatesBegin") {
+            Write-Warning "$($vm.Name) undergoing failover, skipped."
+            $vmsToUpdate.Remove($vm.Name)
+
         } else {
-            $statusMsg += "$($vm.Name) ($($protectedItem.ProtectionState))"
+            Write-Warning "$($vm.Name) ($($protectedItem.ProtectionState)), skipping"
+            $vmsToUpdate.Remove($vm.Name)
         }
     }
 
     if ($vmsToUpdate) {
         Write-Progress -Activity "Replicating Virtual Machines..." -Status "Synchronizing... $($statusMsg -join ', ')"
+        Write-Verbose "Waiting on $($vmsToUpdate -join ',')..."
         Start-Sleep 60
     }
 
