@@ -194,7 +194,21 @@ function Wait-AsrJob {
 
 $startTime = Get-Date
 
-##### validate parameters #####
+# confirm user is logged into subscription
+try {
+    $result = Get-AzContext -ErrorAction Stop
+    if (-not $result.Environment) {
+        Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription context before proceeding."
+        exit
+    }
+
+}
+catch {
+    Write-Error "Please login and set the proper subscription context before proceeding."
+    exit
+}
+
+##### VALIDATE PARAMETERS #####
 
 # make sure virtual networks exist
 if ($NetworkMappingFile) {
@@ -218,30 +232,35 @@ if ($NetworkMappingFile) {
 }
 
 if (-not $PrimaryVnetResourceGroupName) {
-    Write-Error "-PrimaryVnetResourceGroupName or -NetworkMappingFile must be provided." -ErrorAction Stop
+    throw "-PrimaryVnetResourceGroupName or -NetworkMappingFile must be provided."
 }
 
 if (-not $PrimaryVnetName) {
-    Write-Error "-PrimaryVnetName or -NetworkMappingFile must be provided." -ErrorAction Stop
+    throw "-PrimaryVnetName or -NetworkMappingFile must be provided."
 }
 
 if (-not $RecoveryVnetResourceGroupName) {
-    Write-Error "-RecoveryVnetResourceGroupName or -NetworkMappingFile must be provided." -ErrorAction Stop
+    throw "-RecoveryVnetResourceGroupName or -NetworkMappingFile must be provided."
 }
 
 if (-not $RecoveryVnetName) {
-    Write-Error "-RecoveryVnetName or -NetworkMappingFile must be provided." -ErrorAction Stop
+    throw "-RecoveryVnetName or -NetworkMappingFile must be provided."
 }
+
 
 # get networks
-$primaryVnet = Get-AzVirtualNetwork -ResourceGroupName $PrimaryVnetResourceGroupName -Name $PrimaryVnetName -ErrorAction SilentlyContinue
-if (-not $primaryVnet) {
-    Write-Error "Error retrieving virtual network $PrimaryVnetResourceGroupName/$PrimaryVnetName - $($_.Exception)" -ErrorAction Stop
+try {
+    $primaryVnet = Get-AzVirtualNetwork -ResourceGroupName $PrimaryVnetResourceGroupName -Name $PrimaryVnetName -ErrorAction Stop
+}
+catch {
+    throw "Error retrieving virutal network $PrimaryVnetResourceGroupName/$PrimaryVnetName - $($_.Exception)"
 }
 
-$recoveryVnet = Get-AzVirtualNetwork -ResourceGroupName $RecoveryVnetResourceGroupName -Name $RecoveryVnetName
-if (-not $recoveryVnet) {
-    Write-Error "Error retrieving virtual network $RecoveryVnetResourceGroupName/$RecoveryVnetName - $($_.Exception)" -ErrorAction Stop
+try {
+    $recoveryVnet = Get-AzVirtualNetwork -ResourceGroupName $RecoveryVnetResourceGroupName -Name $RecoveryVnetName -ErrorAction Stop
+}
+catch {
+    throw "Error retrieving virtual network $RecoveryVnetResourceGroupName/$RecoveryVnetName - $($_.Exception)"
 }
 
 # make sure Vault ResourceGroup exists
@@ -264,6 +283,7 @@ if (-not $recoveryResourceGroup) {
 }
 
 ##### START PROCESSING #####
+
 $primaryLocation = $primaryResourceGroup.Location
 $recoveryLocation = $recoveryResourceGroup.Location
 if ($primaryLocation -eq $RecoveryLocation) {
@@ -296,7 +316,7 @@ catch {
     Write-Error "Error creating Recovery Vault ($RecoveryVaultName) - $($_.Exception)" -ErrorAction Stop
 }
 
-#Create Cache storage account for replication logs in the primary region
+# create Cache storage account for replication logs in the primary region
 $primaryCacheStorageAccount = Get-LocalAsrCacheStorageAccount -RecoveryVaultResourceGroupName $RecoveryVaultResourceGroupName -RecoveryVaultName $RecoveryVaultName -Location $primaryResourceGroup.Location -ErrorAction 'Stop'
 
 #Create replication policy
