@@ -117,19 +117,24 @@ function Get-LocalAsrContainer {
 
     Param (
         [Parameter(Mandatory = $True)]
-        [string] $Location
+        [string] $Location,
+
+        [Parameter(Mandatory = $False)]
+        $Fabric
     )
 
     $containerName = "asr-a2a-default-$location-container" | Foreach-Object { $_.Substring(0, [Math]::Min($_.Length, 44)) }
 
     try {
-        $fabric = Get-LocalAsrFabric -Location $Location
+        if (-not $Fabric) {
+            $Fabric = Get-LocalAsrFabric -Location $Location
+        }
 
-        $container = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric -Name $containerName -ErrorAction SilentlyContinue
+        $container = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $Fabric -Name $containerName -ErrorAction SilentlyContinue
         if (-not $container) {
-            $asrJob = New-AzRecoveryServicesAsrProtectionContainer -InputObject $fabric -Name $containerName -ErrorAction Stop
+            $asrJob = New-AzRecoveryServicesAsrProtectionContainer -InputObject $Fabric -Name $containerName -ErrorAction Stop
             Wait-AsrJob -AsrJob $asrJob -Message "Creating Protection Container ($containerName)..."
-            $container = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric -Name $containerName -ErrorAction SilentlyContinue
+            $container = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $Fabric -Name $containerName -ErrorAction SilentlyContinue
             Write-Verbose "Protection Container ($containerName) created"
         }
     }
@@ -338,8 +343,8 @@ $primaryFabric = Get-LocalAsrFabric -Location $primaryLocation
 $recoveryFabric = Get-LocalAsrFabric -Location $recoveryLocation
 
 # create protection containers
-$primaryContainer = Get-LocalAsrContainer -Location $primaryLocation
-$recoveryContainer = Get-LocalAsrContainer -Location $recoveryLocation
+$primaryContainer = Get-LocalAsrContainer -Location $primaryLocation -Fabric $primaryFabric
+$recoveryContainer = Get-LocalAsrContainer -Location $recoveryLocation -Fabric $recoveryFabric
 
 # create Protection container mapping between the Primary and Recovery Protection Containers with the Replication policy
 try {
