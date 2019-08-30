@@ -35,8 +35,14 @@ Virtual network to deploy failover virtual machines into
 .PARAMETER KeepPrimaryIPAddresses
 Assign the IP addresses from the PrimaryVms to the Recovery VMs
 
+.PARAMETER NetworkMappingFile
+Path of CSV file containing a mapping of all virtual networks and subnets from Primary to Recovery locations. NetworkMappingFile should contain SourceResourceId and DestinationResourceId of networks. If this file is provided the Primary and Recovery VnetResourceGroupName & VnetName are not necessary, any provided parameters will override the NetworkMappingFile
+
 .EXAMPLE
 .\CreateSiteRecovery.ps1 -RecoveryVaultResourceGroupName 'asr-vault-rg' -RecoveryVaultName 'asr-vault' -PrimaryResourceGroupName 'myproject-rg' -PrimaryVnetResourceGroupName 'vnet-east-rg' -PrimaryVnetName 'vnet-east' -RecoveryResourceGroupName 'myproject-dr-rg' -RecoveryLocation 'westus' -RecoveryVnetResourceGroupName 'vnet-west-rg' -RecoveryVnetName 'vnet-east'
+
+.EXAMPLE
+.\CreateSiteRecovery.ps1 -RecoveryVaultResourceGroupName 'asr-vault-rg' -RecoveryVaultName 'asr-vault' -PrimaryResourceGroupName 'myproject-rg' -RecoveryResourceGroupName 'myproject-dr-rg' -RecoveryLocation 'westus' -NetworkMappingFile '.\networkmap.csv' 
 #>
 
 [CmdletBinding()]
