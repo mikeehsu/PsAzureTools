@@ -223,13 +223,17 @@ Write-Verbose "Loading column headers..."
 $fileColumns = Get-Content -Path $filePath -Head $head -ErrorAction Stop |
     Select-Object -Skip $skip |
     ConvertFrom-Csv -Delimiter $Delimiter
+
+if (-not $fileColumns) {
+    throw "No header found. Please check file and try again."
+}
+
 if ($($fileColumns | Get-Member -Type Properties | Measure-Object).Count -eq 1) {
-    Write-Error "No delimiters found. Please check file or -Delimiter setting and try again." -ErrorAction Stop
-    return
+    throw "No delimiters found. Please check file or -Delimiter setting and try again."
 }
 
 Write-Verbose "Getting columns from Usage table..."
-$columns = Invoke-Sqlcmd -Query "SP_COLUMNS $Table" -ConnectionString $connectionString
+$columns = Invoke-Sqlcmd -Query "SP_COLUMNS $Table" -ConnectionString $connectionString -ErrorAction Stop
 
 $tableData = New-Object System.Data.DataTable
 $tableRow = [Object[]]::new($columns.Count)
