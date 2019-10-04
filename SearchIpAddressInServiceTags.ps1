@@ -268,6 +268,7 @@ $serviceTagFilename = $env:TEMP + '\' + $pathParts[$pathParts.count - 1]
 $null = Invoke-WebRequest $fileLink -PassThru -OutFile $serviceTagFilename
 $serviceTags = Get-Content -Raw -Path $serviceTagFilename | ConvertFrom-Json
 
+$found = 0
 foreach ($service in $serviceTags.values) {
     foreach ($addressPrefix in $service.properties.addressPrefixes) {
         if ($(IsIpAddressInCIDR -IPAddress $ipaddress -CIDRAddress $addressPrefix)) {
@@ -276,7 +277,10 @@ foreach ($service in $serviceTags.values) {
             Write-Output "region        : $($service.properties.region)"
             Write-Output "addressPrefix : $($addressPrefix)"
             Write-Output ""
+
+            $found++
         }
     }
 }
 
+Write-Output "$found entries found in $Environment"
