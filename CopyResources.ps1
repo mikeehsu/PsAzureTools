@@ -207,6 +207,7 @@ $SupportedResourceTypes = @(
     "Microsoft.Compute/availabilitySets",
     "Microsoft.Compute/disks",
     "Microsoft.Compute/virtualMachines",
+    "Microsoft.Logic/workflows",
     "Microsoft.Network/virtualNetworks",
     "Microsoft.Network/virtualNetworks/subnets",
     "Microsoft.Network/applicationGateways",
@@ -307,6 +308,9 @@ foreach ($resource in $template.resources) {
                 }
             }
         }
+
+    } elseif ($resource.Type -eq "Microsoft.Logic/workflows") {
+        # no changes required
 
     } elseif ($resource.Type -eq "Microsoft.Network/loadBalancers") {
         # remove NIC dependencies as NIC contains the loadBalancer. the NIC ID's on the LB are reference only
