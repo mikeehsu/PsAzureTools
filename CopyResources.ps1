@@ -5,9 +5,6 @@ Make a copy of resources or an entire resource group.
 .DESCRIPTION
 This Powershell command will make a copy specific resources or a entire resource group.
 
-.PARAMETER Filename
-Name of file containing Network Security Group configuration
-
 .PARAMETER SourceResourceGroupname
 Name of ResourceGroup to copy
 
