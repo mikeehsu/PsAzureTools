@@ -45,40 +45,40 @@ Excludes any resources found in this array. This includes anything that might ha
 [CmdletBinding()]
 
 Param(
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory = $True)]
     [string] $SourceResourceGroupName,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [array] $SourceResourceNames,
 
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory = $True)]
     [string] $DestinationResourceGroupName,
 
-    [parameter(Mandatory=$True)]
+    [parameter(Mandatory = $True)]
     [string] $DestinationLocation,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [string] $MappingFile,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [boolean] $CopyDiskContents,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [string] $AdminPassword,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [boolean] $ExportTemplateOnly,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [boolean] $KeepSourceIPAddresses,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [array] $IncludeResourceTypes,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [array] $ExcludeResourceTypes,
 
-    [parameter(Mandatory=$False)]
+    [parameter(Mandatory = $False)]
     [array] $ExcludeResourceNames
 )
 
@@ -130,7 +130,7 @@ function UpdateSubnet {
                 $subnet.properties.networkSecurityGroup.id = $nsgIdParts -join '/'
             }
             else {
-                Write-Error "NSG - invalid scenario with $($subnet.properties.networkSecurityGroup.id)"
+                throw "NSG - invalid scenario with $($subnet.properties.networkSecurityGroup.id)"
             }
         }
     }
@@ -154,7 +154,8 @@ if (-not $sourceResourceGroup) {
 if ($SkipVirtualMachines -or $SkipDisks) {
     # do nothing
 
-} else {
+}
+else {
     # make sure parameters set for copying VMs
 
     if ($CopyDiskContents) {
@@ -162,20 +163,21 @@ if ($SkipVirtualMachines -or $SkipDisks) {
             Write-Error "INVALID OPTIONS: Cross-Region copy of disk content not yet supported. Use -CopyDiskContent set to FALSE."
             return
         }
-    } else {
+    }
+    else {
         if (-not $AdminPassword) {
-            Write-Warning 'ADMIN PASSWORD randomly generated. Please reset password to access virtual machines.'
+            Write-Warning 'ADMIN PASSWORD will be randomly generated. Please reset password to access virtual machines.'
         }
     }
 
     if (-not $AdminPassword) {
-        $AdminPassword = -join ((48..57) + (65..91) + (97..122) | Get-Random -Count 15 | ForEach-Object {[char]$_})
+        $AdminPassword = -join ((48..57) + (65..91) + (97..122) | Get-Random -Count 15 | ForEach-Object { [char]$_ })
     }
 }
 
 # load list of resources to extract
-$SourceTemplateFilepath = $env:TEMP + "\" + $SourceResourceGroupName + ".json"
-$DestinationTemplateFilepath = $env:TEMP + "\" + $DestinationResourceGroupName + ".json"
+$SourceTemplateFilepath = $env:TEMP + "/" + $SourceResourceGroupName + ".json"
+$DestinationTemplateFilepath = $env:TEMP + "/" + $DestinationResourceGroupName + ".json"
 
 Write-Verbose "Creating template of current resources to $SourceTemplateFilepath"
 if ($SourceResourceNames) {
@@ -184,26 +186,30 @@ if ($SourceResourceNames) {
     }
     $resources = Get-AzResource -ResourceGroupName $SourceResourceGroupName | Where-Object { $SourceResourceNames -contains $_.Name }
 
-} else {
+}
+else {
     if ($IncludeResourceTypes) {
-        $resources = Get-AzResource -ResourceGroupName $SourceResourceGroupName | Where-Object { $IncludeResourceTypes -contains  $_.ResourceType }
+        $resources = Get-AzResource -ResourceGroupName $SourceResourceGroupName | Where-Object { $IncludeResourceTypes -contains $_.ResourceType }
 
-    } else {
+    }
+    else {
         $resources = Get-AzResource -ResourceGroupName $SourceResourceGroupName
     }
 
     # filter out ExcludeResourceTypes
-    $resources = $resources | Where-Object { $ExcludeResourceTypes -notcontains $_.ResourceType}
+    $resources = $resources | Where-Object { $ExcludeResourceTypes -notcontains $_.ResourceType }
 }
 
 # filter out specific ResourceNames
-$resources = $resources | Where-Object { $ExcludeResourceNames -notcontains $_.Name}
+$resources = $resources | Where-Object { $ExcludeResourceNames -notcontains $_.Name }
 
 # filter out unsupported copy types
 $SupportedResourceTypes = @(
     "Microsoft.Compute/availabilitySets",
     "Microsoft.Compute/disks",
     "Microsoft.Compute/virtualMachines",
+    "Microsoft.KeyVault/vaults",
+    "Microsoft.KeyVault/vaults/secrets",
     "Microsoft.Logic/workflows",
     "Microsoft.Network/virtualNetworks",
     "Microsoft.Network/virtualNetworks/subnets",
@@ -213,7 +219,16 @@ $SupportedResourceTypes = @(
     "Microsoft.Network/networkInterfaces",
     "Microsoft.Network/publicIPAddresses",
     "Microsoft.Network/networkSecurityGroups",
-    "Microsoft.Network/networkSecurityGroups/securityRules"
+    "Microsoft.Network/networkSecurityGroups/securityRules",
+    "Microsoft.Web/serverFarms",
+    "Microsoft.Web/sites",
+    "Microsoft.Web/sites/config",
+    "Microsoft.Web/sites/deployments",
+    "Microsoft.Web/sites/hostNameBindings",
+    "Microsoft.Web/sites/slots",
+    "Microsoft.Web/sites/slots/config",
+    "Microsoft.Web/sites/slots/deployments",
+    "Microsoft.Web/sites/slots/hostNameBindings"
 )
 
 $SupportedResources = @()
@@ -224,13 +239,16 @@ foreach ($resource in $resources) {
         if ($resource.Type -eq 'Microsoft.Compute/disks') {
             if ($CopyDiskContents) {
                 $disksToCopy += Get-AzDisk -ResourceGroupName $resource.ResourceGroupName -Name $resource.Name
-            } else {
+            }
+            else {
                 Write-Verbose "DISK NOT COPIED: $($resource.ResourceType) ($($resource.name)) will not be copied. Use -CopyDiskContents to copy disks."
             }
-        } else {
+        }
+        else {
             $SupportedResources += $resource
         }
-    } else {
+    }
+    else {
         Write-Warning "COPY NOT SUPPORTED: $($resource.ResourceType) ($($resource.name)) not supported."
     }
 }
@@ -257,10 +275,12 @@ foreach ($resource in $template.resources) {
         $resource.dependsOn = $null
         $resource.properties.virtualMachines = $null
 
-    } elseif ($resource.Type -eq "Microsoft.Compute/disks") {
+    }
+    elseif ($resource.Type -eq "Microsoft.Compute/disks") {
         Write-Error "INVALID SCENARIO: $($resource.Type) needs to be handled in pre-processing"
 
-    } elseif ($resource.Type -eq "Microsoft.Compute/virtualMachines") {
+    }
+    elseif ($resource.Type -eq "Microsoft.Compute/virtualMachines") {
         if ($resource.identity) {
             $resource.identity = $null
         }
@@ -274,11 +294,12 @@ foreach ($resource in $template.resources) {
                 -Replace $('/resourceGroups/' + $SourceResourceGroupName + '/'), $('/resourceGroups/' + $DestinationResourceGroupName + '/')
 
             foreach ($dataDisk in $resource.properties.storageProfile.dataDisks) {
-                $dataDisk.managedDisk.id =  $dataDisk.managedDisk.id `
+                $dataDisk.managedDisk.id = $dataDisk.managedDisk.id `
                     -Replace $('/resourceGroups/' + $SourceResourceGroupName + '/'), $('/resourceGroups/' + $DestinationResourceGroupName + '/')
             }
 
-        } else {
+        }
+        else {
             $resource.properties.osProfile | Add-Member -NotePropertyName adminPassword -NotePropertyValue $adminPassword
             $resource.properties.storageProfile.osDisk.managedDisk.id = $null
             foreach ($dataDisk in $resource.properties.storageProfile.dataDisks) {
@@ -287,15 +308,31 @@ foreach ($resource in $template.resources) {
             }
         }
 
-    } elseif ($resource.Type -eq "Microsoft.Compute/virtualMachines/extensions") {
+    }
+    elseif ($resource.Type -eq "Microsoft.Compute/virtualMachines/extensions") {
         # not not add to final template
         Write-Warning "COPY NOT SUPPORTED: $($resource.ResourceType) ($($resource.name)) not supported."
         continue
 
-    } elseif ($resource.Type -eq "Microsoft.Network/applicationGateways") {
+    }
+    elseif ($resource.Type -eq "Microsoft.KeyVault/vaults") {
+        # no changes required
+
+    }
+    elseif ($resource.Type -eq "Microsoft.KeyVault/vaults/secrets") {
+        # do not copy
+        continue
+
+    }
+    elseif ($resource.Type -eq "Microsoft.Logic/workflows") {
+        # no changes required
+        Write-Warning "PARTIAL SUPPORT: $($resource.Type) ($($resource.name)) support only for simple flows."
+
+    }
+    elseif ($resource.Type -eq "Microsoft.Network/applicationGateways") {
         # remove NIC dependencies as NIC contains the applicationGateway. the NIC ID's on the LB are reference only
         if ($resource.dependsOn) {
-            [array] $resource.dependsOn = $resource.dependsOn | Where-Object {$_ -notlike "*Microsoft.Network/networkInterfaces*"}
+            [array] $resource.dependsOn = $resource.dependsOn | Where-Object { $_ -notlike "*Microsoft.Network/networkInterfaces*" }
         }
 
         if ($KeepSourceIPAddresses) {
@@ -305,14 +342,11 @@ foreach ($resource in $template.resources) {
                 }
             }
         }
-
-    } elseif ($resource.Type -eq "Microsoft.Logic/workflows") {
-        # no changes required
-
-    } elseif ($resource.Type -eq "Microsoft.Network/loadBalancers") {
+    }
+    elseif ($resource.Type -eq "Microsoft.Network/loadBalancers") {
         # remove NIC dependencies as NIC contains the loadBalancer. the NIC ID's on the LB are reference only
         if ($resource.dependsOn) {
-            [array] $resource.dependsOn = $resource.dependsOn | Where-Object {$_ -notlike "*Microsoft.Network/networkInterfaces*"}
+            [array] $resource.dependsOn = $resource.dependsOn | Where-Object { $_ -notlike "*Microsoft.Network/networkInterfaces*" }
         }
 
         if ($KeepSourceIPAddresses) {
@@ -323,21 +357,27 @@ foreach ($resource in $template.resources) {
             }
         }
 
-    } elseif ($resource.Type -eq "Microsoft.Network/loadBalancers/inboundNatRules") {
+    }
+    elseif ($resource.Type -eq "Microsoft.Network/loadBalancers/inboundNatRules") {
         # no changes required
 
-    } elseif ($resource.Type -eq "Microsoft.Network/networkInterfaces") {
+    }
+    elseif ($resource.Type -eq "Microsoft.Network/networkInterfaces") {
         if ($KeepSourceIPAddresses) {
             foreach ($ipConfig in $resource.Properties.ipConfigurations) {
                 $ipConfig.properties.privateIPAllocationMethod = 'Static'
             }
         }
-    } elseif ($resource.Type -eq "Microsoft.Network/networkSecurityGroups") {
+    }
+    elseif ($resource.Type -eq "Microsoft.Network/networkSecurityGroups") {
         # no changes required
 
-    } elseif ($resource.Type -eq "Microsoft.Network/networkSecurityGroups/securityRules") {
+    }
+    elseif ($resource.Type -eq "Microsoft.Network/networkSecurityGroups/securityRules") {
         # no changes required
-    } elseif ($resource.Type -eq "Microsoft.Network/publicIPAddresses") {
+
+    }
+    elseif ($resource.Type -eq "Microsoft.Network/publicIPAddresses") {
         # $resource.properties.publicIpAllocationMethod = 'Dynamic'
         if ($resource.properties.ipAddress) {
             $resource.properties.ipAddress = $null
@@ -348,7 +388,8 @@ foreach ($resource in $template.resources) {
             Write-Warning "PUBLIC IP MODIFIED: $($resource.Type) ($($resource.name)) DNS settings ignored. Update settings as needed after deployment."
         }
 
-    } elseif ($resource.Type -eq "Microsoft.Network/virtualNetworks") {
+    }
+    elseif ($resource.Type -eq "Microsoft.Network/virtualNetworks") {
         $nsgNames = $($resources | Where-Object { $_.Type -eq 'Microsoft.Network/networkSecurityGroups' }).Name
 
         # vnet top level
@@ -365,14 +406,47 @@ foreach ($resource in $template.resources) {
                 -includedNsgNames $nsgNames
         }
 
-    } elseif ($resource.Type -eq "Microsoft.Network/virtualNetworks/subnets") {
+    }
+    elseif ($resource.Type -eq "Microsoft.Network/virtualNetworks/subnets") {
         $resource = UpdateSubnet -subnet $resource `
             -SourceResourceGroupName $SourceResourceGroupName `
             -DestinationResourceGroupName $DestinationResourceGroupName `
             -DestinationLocation $DestinationLocation `
             -includedNsgNames $nsgNames
 
-    } else {
+    }
+    elseif ($resource.Type -eq "Microsoft.Web/serverFarms") {
+
+    }
+    elseif ($resource.Type -eq "Microsoft.Web/sites") {
+        $resource.Identity.PrincipalId = $null
+        $resource.Identity.TenantId = $null
+
+    }
+    elseif ($resource.Type -eq "Microsoft.Web/sites/config") {
+        # no changes necessary
+    }
+    elseif ($resource.Type -eq "Microsoft.Web/sites/deployments") {
+        # no changes necessary
+    }
+    elseif ($resource.Type -eq "Microsoft.Web/sites/hostNameBindings") {
+        # drop section - no need to copy when creating a new site
+        continue
+    }
+    elseif ($resource.Type -eq "Microsoft.Web/sites/slots") {
+        # no changes necessary
+    }
+    elseif ($resource.Type -eq "Microsoft.Web/sites/slots/config") {
+        # no changes necessary
+    }
+    elseif ($resource.Type -eq "Microsoft.Web/sites/slots/deployments") {
+        # no changes necessary
+    }
+    elseif ($resource.Type -eq "Microsoft.Web/sites/slots/hostNameBindings") {
+        # drop section - no need to copy when creating a new site
+        continue
+    }
+    else {
         Write-Warning "NOT SUPPORTED: $($resource.Type) will not be copied."
     }
 
@@ -387,6 +461,11 @@ if ($MappingFile) {
     $mappings = Import-Csv $MappingFile
     foreach ($mapping in $mappings) {
         $templateJson = $templateJson.Replace('"' + $mapping.SourceResourceId + '"', '"' + $mapping.DestinationResourceId + '"')
+        $templateJson = $templateJson.Replace("'" + $mapping.SourceResourceId + "'", "'" + $mapping.DestinationResourceId + "'")
+        $templateJson = $templateJson.Replace('/' + $mapping.SourceResourceId + '/', '/' + $mapping.DestinationResourceId + '/')
+        $templateJson = $templateJson.Replace('"' + $mapping.SourceResourceId + '/', '"' + $mapping.DestinationResourceId + '/')
+        $templateJson = $templateJson.Replace('/' + $mapping.SourceResourceId + '-', '/' + $mapping.DestinationResourceId + '-')
+        $templateJson = $templateJson.Replace('"' + $mapping.SourceResourceId + '(', '"' + $mapping.DestinationResourceId + '(')
     }
 }
 $templateJson | Set-Content -Path $DestinationTemplateFilepath
@@ -408,8 +487,9 @@ try {
     }
     $null = New-AzResourceGroup -Name $DestinationResourceGroupName -Location $location -Force -ErrorAction Stop
 
-} catch {
-    Write-Error "Error accessing Resource Group $DestinationResourceGroupName - $($_.Exception)"
+}
+catch {
+    throw "Error accessing Resource Group $DestinationResourceGroupName - $($_.Exception)"
     exit
 }
 
@@ -426,8 +506,9 @@ if ($disksToCopy) {
 try {
     $deploymentName = $DestinationResourceGroupName + '_' + $(Get-Date -Format 'yyyyMMddhhmmss')
     $job = New-AzResourceGroupDeployment -Name $deploymentName -TemplateFile $DestinationTemplateFilepath -ResourceGroupName $DestinationResourceGroupName -AsJob -ErrorAction Stop
-} catch {
-    Write-Error "Error starting deployment - $result - $($_.Exception)" -ErrorAction Stop
+}
+catch {
+    throw "Error starting deployment - $result - $($_.Exception)"
 }
 
 Write-Progress -Activity "Deploying Resources ($deploymentName)..."
@@ -436,7 +517,7 @@ $job = Get-Job -Id $job.Id
 while ($job.state -eq 'Running') {
     Start-Sleep 10
     $operation = Get-AzResourceGroupDeploymentOperation -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName -ErrorAction 'Stop'
-    $working = $operation.Properties | Where-Object {$_.provisioningState -ne 'Succeeded'}
+    $working = $operation.Properties | Where-Object { $_.provisioningState -ne 'Succeeded' }
 
     Write-Progress -Activity "Deploying Resources ($deploymentName)..." -Status "Working on $($working.targetResource.resourceName -join ', ')"
 
@@ -452,14 +533,14 @@ if ($job.state -eq 'Failed') {
 # get deployment status & any failures
 $deployment = Get-AzResourceGroupDeployment -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName
 
-$failedOperations = Get-AzResourceGroupDeploymentOperation -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName  | Where-Object { $_.Properties.ProvisioningState -ne 'Succeeded' }
+$failedOperations = Get-AzResourceGroupDeploymentOperation -ResourceGroupName $DestinationResourceGroupName -DeploymentName $deploymentName | Where-Object { $_.Properties.ProvisioningState -ne 'Succeeded' }
 if ($failedOperations) {
     $errorMsg = $null
     foreach ($failedOperation in $failedOperations) {
         $targetResourceName = $($failedOperation.properties.targetResource.Id -split '/')[-1]
         $errorMsg += "$($targetResourceName) - $($failedOperation.properties.statusMessage.error.message)`n"
     }
-    Write-Error $errorMsg
+    throw $errorMsg
 }
 
 $elapsedTime = $(Get-Date) - $startTime
