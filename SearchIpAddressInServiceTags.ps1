@@ -23,7 +23,7 @@ Param (
 )
 
 Function Get-IPv4NetworkInfo {
-<#
+    <#
 .SYNOPSIS
 Gets extended information about an IPv4 network.
 
@@ -160,8 +160,14 @@ https://www.ryandrane.com/2016/05/getting-ip-network-information-powershell/
     $NumberOfHosts = ($BroadcastAddressInt - $NetworkAddressInt) - 1
 
     #Calculate the max and min usable host IPs.
-    $HostMinIP = [ipaddress]([convert]::ToDouble($NetworkAddressInt + 1)) | Select-Object -ExpandProperty IPAddressToString
-    $HostMaxIP = [ipaddress]([convert]::ToDouble($NetworkAddressInt + $NumberOfHosts)) | Select-Object -ExpandProperty IPAddressToString
+    if ($NumberOfHosts -gt 1) {
+        $HostMinIP = [ipaddress]([convert]::ToDouble($NetworkAddressInt + 1)) | Select-Object -ExpandProperty IPAddressToString
+        $HostMaxIP = [ipaddress]([convert]::ToDouble($NetworkAddressInt + $NumberOfHosts)) | Select-Object -ExpandProperty IPAddressToString
+    }
+    else {
+        $HostMinIP = $IPAddress
+        $HostMaxIP = $IPAddress
+    }
 
     # Declare an empty array to hold our range of usable IPs.
     $IPRange = @()
@@ -231,7 +237,7 @@ function IsIpAddressInCIDR {
 $ErrorActionPreference = "Stop"
 
 if (-not $environment) {
-    $environment = $(Get-AzSubscription).ExtendedProperties.Environment
+    $environment = $(Get-AzContext).Environment.Name
 }
 
 if ($environment -eq 'AzureCloud') {
@@ -251,7 +257,7 @@ elseif ($environment -eq 'AzureChinaCloud') {
 
 }
 else {
-    ThrowError "Invaild Environment $environment"
+    throw "Invaild Environment $environment"
 }
 
 Write-Output "Searching $environment..."
@@ -262,11 +268,17 @@ $fileLink = ($pageHTML.Links | Where-Object { $_.outerHTML -like "*click here to
 
 # extract the filename
 $pathParts = $fileLink.Split('/')
-$serviceTagFilename = $env:TEMP + '\' + $pathParts[$pathParts.count - 1]
+$dirPath = ''
+if ($env:TEMP) {
+    $dirPath = $env:TEMP + '/'
+}
+$serviceTagFilename = $dirPath + $pathParts[$pathParts.count - 1]
 
 # download the JSON file to the TEMP directory
 $null = Invoke-WebRequest $fileLink -PassThru -OutFile $serviceTagFilename
 $serviceTags = Get-Content -Raw -Path $serviceTagFilename | ConvertFrom-Json
+
+# $serviceTags = Get-AzNetworkServiceTag -Location eastus2
 
 $found = 0
 foreach ($service in $serviceTags.values) {
