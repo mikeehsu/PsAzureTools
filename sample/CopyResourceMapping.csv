@@ -1,0 +1,4 @@
+SourceResourceId,DestinationResourceId
+source-vnet,dest-vnet
+source-vnet/subnet-a,dest-vnet/subnet-a1
+webapp1,webapp1a
