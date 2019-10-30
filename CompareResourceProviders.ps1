@@ -3,19 +3,19 @@
 Compare the current set of Azure resource providers with a previously saved copy.
 
 .DESCRIPTION
-This Powershell command will compare the current set of resource providers with a 
-saved copy of the resource providers. This is useful in seeing what has changed 
+This Powershell command will compare the current set of resource providers with a
+saved copy of the resource providers. This is useful in seeing what has changed
 in Azure since the last time you saved a copy, keeping you informed on new feature
 that may have been introduced, or sometimes a peek into what might be coming up.
 
 .PARAMETER FilePath
-Path of file to compare against the current providers, or in the case where 
--SaveCurrentProviders is set the current providers details will be saved to this 
+Path of file to compare against the current providers, or in the case where
+-SaveCurrentProviders is set the current providers details will be saved to this
 FilePath
 
 .PARAMETER SaveCurrentProviders
-If SaveCurrentProviders is set then the current provider details will be written 
-to the provided FilePath 
+If SaveCurrentProviders is set then the current provider details will be written
+to the provided FilePath
 
 .EXAMPLE
 .\CompareResourceProviders.ps1 -FilePath SaveCopyOfProviders.json
@@ -58,6 +58,18 @@ Function Compare-ObjectProperties {
 
 #################################################
 # MAIN
+
+# confirm user is logged into subscription
+try {
+    $result = Get-AzContext -ErrorAction Stop
+    if (-not $result.Environment) {
+        throw"Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
+    }
+
+}
+catch {
+    throw "Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
+}
 
 if ($SaveCurrentProviders) {
     Get-AzResourceProvider | ConvertTo-Json -Depth 10 | Out-File $FilePath
