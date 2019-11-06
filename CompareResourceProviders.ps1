@@ -17,9 +17,13 @@ FilePath
 If SaveCurrentProviders is set then the current provider details will be written
 to the provided FilePath
 
+.PARAMETER ShowOnlyNew
+Show only new providers, suppressing changes to locations and API versions
+
 .EXAMPLE
 .\CompareResourceProviders.ps1 -FilePath SaveCopyOfProviders.json
 .\CompareResourceProviders.ps1 -FilePath SaveCopyOfProviders.json -SaveCurrentProviders
+.\CompareResourceProviders.ps1 -FilePath SaveCopyOfProviders.json -ShowOnlyNew
 #>
 
 Param (
@@ -27,7 +31,10 @@ Param (
     [string] $FilePath,
 
     [Parameter(Mandatory = $false)]
-    [switch] $SaveCurrentProviders
+    [switch] $SaveCurrentProviders,
+
+    [Parameter(Mandatory = $false)]
+    [switch] $ShowOnlyNew
 )
 
 #################################################
@@ -94,6 +101,10 @@ foreach ($provider in $new) {
     foreach ($resourceType in $provider.resourceTypes) {
         $originalResourceType = $originalResources[$provider.ProviderNamespace + '/' + $resourceType.ResourceTypeName]
         if ($originalResourceType) {
+            if ($ShowOnlyNew) {
+                continue
+            }
+
             $diffs = Compare-ObjectProperties $resourceType $originalResourceType
 
             if ($diffs) {
