@@ -1,5 +1,5 @@
 # only supported with Powershell .NET framework
-# needs ParsedHTML support in
+# needs ParsedHTML support in order to parse tables
 
 [CmdletBinding()]
 param (
@@ -126,7 +126,7 @@ for ($t = 0; $t -lt $tables.Length - 2; $t++) {
     foreach ($row in $($table.rows | Select-Object -Skip 1)) {
         $vm = [VmPrice]::New()
         $vm.instance = $($row.cells[1].innerHTML | Select-String -Pattern "^[^<]+" | % { $_.Matches } | % { $_.Value }).trim()
-        $vm.vcpu = $($row.cells[2].innerHTML | Select-String -Pattern "^[^<]+" | % { $_.Matches } | % { $_.Value }).trim()
+        $vm.vcpu = $($row.cells[2].innerHTML.Replace('/', '|') | Select-String -Pattern "^[^<]+" | % { $_.Matches } | % { $_.Value }).trim()
         $vm.memory = $row.cells[3].innerHTML
         $vm.storage = $row.cells[4].innerHTML
         $vm.payg = IsNull ([float] $($row.cells[5].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
