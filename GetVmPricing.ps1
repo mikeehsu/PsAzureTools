@@ -139,8 +139,8 @@ for ($t = 0; $t -lt $tables.Length - 2; $t++) {
 }
 
 if ($Path) {
-    $vms | Export-Csv -Path $Path -NoTypeInformation
+    $vms | Sort-Object -Property instance | Export-Csv -Path $Path -NoTypeInformation
 }
 else {
-    $vms | ConvertTo-Csv
+    $vms | Sort-Object -Property instance | ConvertTo-Csv
 }

@@ -102,6 +102,8 @@ $page = Invoke-WebRequest $priceUrl
 $tables = $page.ParsedHtml.body.getElementsByTagName('Table')
 
 for ($t = 0; $t -lt $tables.Length - 1; $t++) {
+    Write-Progress -Activity "Parsing data..." -PercentComplete $($t / $tables.Length * 100)
+
     $table = $tables[$t]
     foreach ($row in $($table.rows | Select-Object -Skip 1)) {
         $disk = [DiskPrice]::New()
