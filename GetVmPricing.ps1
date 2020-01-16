@@ -16,6 +16,11 @@ param (
     [string] $OsType = 'Windows'
 )
 
+if ($PSVersionTable.PSVersion.Major -ge 6) {
+    Write-Error "This script currently only runs under Windows Powershell due to its use of ParsedHtml functions"
+    return
+}
+
 $locations = @{ }
 $locations['eastasia'] = 'asia-pacific-east'
 $locations['southeastasia'] = 'asia-pacific-southeast'
@@ -136,6 +141,12 @@ for ($t = 0; $t -lt $tables.Length - 2; $t++) {
         $vm.ri3year = IsNull ([float] $($row.cells[7].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
         $vm.ahub = IsNull ([float] $($row.cells[8].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
 
+        # skip any invalid data (looking for valid vcpu content)
+        if ($vm.vcpu -notmatch "^[\d\s\/\|+]+$") {
+            Write-Verbose "INVALID DATA SKIPPED - $($row.cells[1].innerHTML) -  $($row.cells[2].innerHTML) -  $($row.cells[3].innerHTML)"
+            continue
+        }
+
         $vms += $vm
     }
 }
@@ -144,5 +155,5 @@ if ($Path) {
     $vms | Sort-Object -Property instance | Export-Csv -Path $Path -NoTypeInformation
 }
 else {
-    $vms | Sort-Object -Property instance | ConvertTo-Csv
+    $vms | Sort-Object -Property instance | ConvertTo-Csv -NoTypeInformation
 }
