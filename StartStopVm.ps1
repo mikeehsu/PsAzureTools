@@ -5,6 +5,12 @@ Start or Stop a set of Virtual Macheins.
 .DESCRIPTION
 This script is used to Start or Stop a set of Vms. All item listed in the -Include parameters will be selected. All items listed in the -Exclude parameters will be excluded. Exclusions will take precedence.
 
+.PARAMETER Action
+Start of Stop action to take
+
+.PARAMETER SetVmCount
+Specify how many Virtual Machines to leave up and running
+
 .PARAMETER IncludeVmNames
 List of Virtual Machine Names to include
 
@@ -29,13 +35,20 @@ If specified this will wait until the action completes before returning back. By
 .EXAMPLE
 .\StartStopVm.ps1 -IncludeResourceGroupNames 'test-rg' -IncludeTags = @( @{ENIVRONMENT = 'DEV'} ) -ExcludeVmNames 'my-db'
 
+.\StartStopVm.ps1 -SetVmCount 5 -IncludeResourceGroupNames 'test-rg' 
 .NOTES
 #>
 [CmdletBinding()]
 
 Param (
-    [Parameter(Mandatory = $true)]
+    [Parameter(ParameterSetName='PerformAction',
+        Mandatory = $true)]
+    [ValidateSet('Start','Stop')]
     [string] $Action,
+
+    [Parameter(ParameterSetName='SetVMCount', 
+        Mandatory = $true)]
+    [int] $SetVmCount,
 
     [Parameter(Mandatory = $false)]
     [array] $IncludeVmNames,
@@ -47,7 +60,7 @@ Param (
     [array] $IncludeResourceGroupNames,
 
     [Parameter(Mandatory = $false)]
-    [array] $ExcludResourceGroupNames,
+    [array] $ExcludeResourceGroupNames,
 
     [Parameter(Mandatory = $false)]
     [array] $IncludeTags,
@@ -60,7 +73,20 @@ Param (
 )
 
 #######################################################################
+function WriteScriptTimers {
+    param (
+        [string] $comment
+    )
+
+    $elapsedTime = $(Get-Date) - $startTime
+    $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
+    Write-Output "$comment ($totalTime elapsed)"        
+}
+
+
+#######################################################################
 ## MAIN
+Set-StrictMode -Version 2.0
 
 $startTime = Get-Date
 
@@ -76,11 +102,7 @@ catch {
     throw "Please login and set the proper subscription context before proceeding."
 }
 
-# validate parameters
-if ( @('Start', 'Stop') -notcontains $Action) {
-    throw "Action ($Action) invalid. Action must be either Start of Stop."
-}
-
+# make sure at least one selection parameter is passed in
 if (-not $IncludeVmNames -and
     -not $IncludeResourceGroupNames -and
     -not $IncludeTags -and
@@ -105,8 +127,9 @@ foreach ($tag in $IncludeTags) {
 }
 
 $includeExpr = $includeItems -join ' -or '
-Write-Verbose "VMs to include: $includeExpr"
-
+if (-not $includeExpr) {
+    $includeExpr = '$true'
+}
 
 # build exclusion expression
 $excludeItems = @()
@@ -123,28 +146,80 @@ foreach ($tag in $ExcludeTags) {
 }
 
 $excludeExpr = $excludeItems -join ' -or '
-Write-Verbose "VMs to exclude: $excludeExpr"
+if (-not $excludeExpr) {
+    $excludeExpr = '$false'
+}
 
 # get Vms
 try {
-    $cmd = "Get-AzVm | Where-Object { ($includeExpr) -and -not ($excludeExpr) }"
+    $cmd = "Get-AzVm -Status | Where-Object { ($includeExpr) -and -not ($excludeExpr) }"
+    Write-Debug $cmd
     $vms = Invoke-Expression $cmd
 } catch {
     throw "Error selecting VMs - $cmd"
 }
 Write-Output "VMs selected: $($vms.Name -join ', ')"
 
+# set a -SetVmCount, instead of action. use $PSBoundParameters.ContainsKey, simple $SetVmCount returns false when 0
+if ($PSBoundParameters.ContainsKey('SetVmCount')) {
+    Write-Verbose "Setting VM count to: $SetVmCount"
+
+    $runningVms = @()
+    $runningVms += $vms | Where-Object {$_.PowerState -eq 'VM Running'} | Sort-Object -Property Name
+
+    $otherVms = @()
+    $otherVms += $vms | Where-Object {$_.PowerState -ne 'VM Running'} | Sort-Object -Property Name
+
+    Write-Output "$($runningVms.Count) VMs running"
+
+    if ($vms.Count -lt $SetVmCount) {
+        Write-Output "Only $($vms.Count) VMs found, will start all VMs."
+        $Action = 'Start'
+
+    } elseif ($runningVms.Count -eq $SetVmCount) {
+        $vms = $null
+
+    } elseif ($runningVms.Count -gt $SetVmCount) {
+        Write-Output "stopping $($runningVms.Count-$SetVmCount) VMs"
+        $Action = 'Stop'
+        if ($SetVmCount -eq 0 -and $runningVms.Count-1 -eq 0) {
+            # some bug is preventing [0..0] from returning a single element
+            $vms = $runningVms[0]
+        } else {
+            $vms = $runningVms[$($SetVmCount)..$($runningVms.Count-1)]
+        }
+        
+    } elseif ($runningVms.Count -lt $SetVmCount) {
+        Write-Output "starting $($SetVmCount-$runningVms.Count) VMs"
+        $Action = 'Start'
+        $lastVmIndex = $SetVmCount-$runningVms.Count-1
+        if ($lastVmIndex -eq 0) {
+            # some bug is preventing [0..0] from returning a single element
+            $vms = $otherVms[0]
+        } else {
+            $vms = $otherVms[0..$lastVmIndex]
+        }
+    }
+}
+
+# check for VMs to process
+if (-not $vms) {
+    Write-Output 'No VMs selected.'
+    WriteScriptTimers -comment "Script complete."
+    return
+}
+Write-Verbose "VMs to $($Action): $($vms.Name -join ', ')"
 
 # execute the action
 $jobs = @()
 foreach ($vm in $vms) {
     if ($Action -eq 'Start') {
         $jobs += Start-AzVm -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name -AsJob
-        Write-Output "$($vm.Name) starting"
+        Write-Output "starting '$($vm.Name)'"
 
     } elseif ($Action -eq 'Stop') {
         $jobs += Stop-AzVm -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name -Force -AsJob
-        Write-Output "$($vm.Name) stopping"
+        Write-Output "stopping '$($vm.Name)'"
 
     } else {
         throw "Invalid action ($Action)"
@@ -153,17 +228,18 @@ foreach ($vm in $vms) {
 
 # wait for jobs to complete
 if (-not $Wait) {
+    Write-Output "Job submitted. Check job status using Get-Job."
+    WriteScriptTimers -comment "Script complete."
     return
 }
 
-[System.Collections.ArrayList] $jobIds = $($jobs.Id)
+$jobIds =  [System.Collections.ArrayList] @($jobs.Id)
 do {
     $job = Wait-Job -Id $jobIds[0]
     Write-Output "$($job.Name) $($job.StatusMessage)"
 
+    Remove-Job $job
     $jobIds.Remove($jobIds[0])
 } until (-not $jobIds)
 
-$elapsedTime = $(Get-Date) - $startTime
-$totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
-Write-Output "$Action complete. ($totalTime elapsed)"
+WriteScriptTimers -comment "Script complete."
