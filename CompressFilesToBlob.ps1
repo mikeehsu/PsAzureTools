@@ -22,6 +22,9 @@ URI of container. When using ContainerURI, this should contain any SAS token nec
 .PARAMETER ArchiveFileName
 Name of archive flie. This will default to the filename or directory name with a .7z extension when compressing the file(s).
 
+.PARAMETER AppendDateToFileName
+Add the current date to the ArchiveFileName
+
 .PARAMETER ArchiveTempDir
 Directory to use for the .7z archive compression. If no directory is specific, the archive will be placed in the TEMP directory specified by the current environment variable.
 
@@ -64,6 +67,9 @@ param (
 
     [Parameter(Mandatory=$false)]
     [string] $ArchiveFileName,
+
+    [Parameter(Mandatory=$false)]
+    [switch] $AppendDateToFileName,
 
     [Parameter(Mandatory=$false)]
     [string] $ArchiveTempDir = $env:TEMP,
@@ -183,13 +189,22 @@ if (-not $(Test-Path -Path $SourceFilePath)) {
 } 
 $sourceFilename = Split-Path -Path $SourceFilePath -Leaf
 
-# check for existing zip file
+# determine filename for zip file
 if ($ArchiveFileName) {
-    $ArchiveFilePath = $ArchiveTempDir + $ArchiveFileName + '.7z'
+    if (-not $ArchiveFileName.EndsWith('.7z')) {
+        $ArchiveFilePath = $ArchiveTempDir + $ArchiveFileName + '.7z'        
+    }
 } else {
     $ArchiveFilePath = $ArchiveTempDir + $sourceFilename + '.7z'
 }
 
+if ($AppendDateToFileName) {
+    $path = [System.IO.FileInfo] $ArchiveFilePath
+    $yyyymmdd = "{0:yyyyMMdd}" -f $(Get-Date)
+    $ArchiveFilePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $yyyymmdd + $path.Extension
+}
+
+# check for existing zip file
 $updateZipFile = $true
 if (Test-Path -Path $ArchiveFilePath) {
     $answer = Read-Host "$ArchiveFilePath already exists. (Replace/Update/Skip/Cancel)?"
@@ -202,8 +217,7 @@ if (Test-Path -Path $ArchiveFilePath) {
     } elseif ($answer -like 'R*') {
         Remove-Item -Path $ArchiveFilePath -Force
     }
-
-} 
+}
 
 # zip the source
 if ($updateZipFile) {
