@@ -11,13 +11,13 @@ the files on the local VM disks.
 Source path on the local machine to archive
 
 .PARAMETER StorageAccountName
-Name of the storage account to upload the archive file to
+Name of the storage account to upload the archive file to. Cannot be used with ContainerURI.
 
 .PARAMETER ContainerName
-Name of the container to upload the archive file to
+Name of the container to upload the archive file to. Cannot be used with ContainerURI
 
 .PARAMETER ContainerURI
-URI of container. When using ContainerURI, this should contain any SAS token necessary to upload the archive
+URI of container. When using ContainerURI, this should contain any SAS token necessary to upload the archive. Cannot be used with -StorageAccountName, -ContainerName, -ManagedIdentity, or -Environment
 
 .PARAMETER ArchiveFileName
 Name of archive flie. This will default to the filename or directory name with a .7z extension when compressing the file(s).
@@ -38,7 +38,7 @@ Specifies the directory where the 7z.exe command can be found. If not specified,
 Specifies the directory where the azcpoy.exe command can be found. If not specified, it will look in the current PATH 
 
 .PARAMETER UseManagedIdentity
-Specifies the use of Managed Identity to authenticate into Azure Powershell APIs and azcopy.exe. If not specified, the AzureCloud is use by default.
+Specifies the use of Managed Identity to authenticate into Azure Powershell APIs and azcopy.exe. If not specified, the AzureCloud is use by default. Cannot be used with 
 
 .PARAMETER Environment
 Specifies the Azure cloud environment to use for authentication. If not specified the AzureCloud is used by default
@@ -53,43 +53,224 @@ CompressFilesToBlob.ps1 -SourceFilePath C:\TEMP\archivefiles -ContainerURI 'http
 
 [CmdletBinding()]
 param (
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [string] $SourceFilePath,
     
-    [Parameter(ParameterSetName="StorageAccount", Mandatory=$true)]
+    [Parameter(ParameterSetName = "StorageAccount", Mandatory = $true)]
     [string] $StorageAccountName,
 
-    [Parameter(ParameterSetName="StorageAccount", Mandatory=$true)]
+    [Parameter(ParameterSetName = "StorageAccount", Mandatory = $true)]
     [string] $ContainerName,
 
-    [Parameter(ParameterSetName="ContainerURI", Mandatory=$true)]
+    [Parameter(ParameterSetName = "ContainerURI", Mandatory = $true)]
     [string] $ContainerURI,
 
-    [Parameter(Mandatory=$false)]
-    [string] $ArchiveFileName,
-
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [switch] $AppendDateToFileName,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string] $ArchiveTempDir = $env:TEMP,
 
-    [Parameter(Mandatory=$false)]
-    [ValidateSet('Simple','Full','None')]
+    [Parameter(Mandatory = $false)]
+    [string] $ArchiveFileName,
+
+    [Parameter(Mandatory = $false)]
+    [switch] $SeparateEachDirectory,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('Simple', 'Full', 'None')]
     [string] $ArchiveCheck = "Simple",
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string] $ZipCommandDir = "",
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string] $AzCopyCommandDir = "",
 
-    [Parameter(ParameterSetName="ManagedIdentity", Mandatory=$false)]
+    [Parameter(ParameterSetName = "StorageAccount", Mandatory = $false)]
     [switch] $UseManagedIdentity,
 
-    [Parameter(ParameterSetName="ManagedIdentity", Mandatory=$false)]
+    [Parameter(ParameterSetName = "StorageAccount", Mandatory = $false)]
     [string] $Environment
+
 )
+
+#####################################################################
+
+function ArchiveCheckFull {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string] $filePath,
+
+        [Parameter(Mandatory = $true)]
+        [string] $sourcePath
+    )
+
+    # load CRC list from zip file
+    $startTime = Get-Date
+    $command = "$zipExe l -slt $filePath"
+    $currentPath = $null
+    $zipCRC = @{ }
+    Write-Debug "Loading CRC from $filePath..."
+    Invoke-Expression -Command $command | ForEach-Object {
+        if ($_.StartsWith('Path')) {
+            $currentPath = $_.Substring($_.IndexOf('=') + 2)
+        }
+        elseif ($_.StartsWith('CRC')) {
+            $zipCRC[$currentPath] = $_.Substring($_.IndexOf('=') + 2)
+        }
+    }
+
+    # get CRC from source filepath and compare against list from zip file
+    # sample CRC: 852DD72D      57490143  temp\20191230_hibt_chicken.mp3_bf969ccfdacaede5b20f6473ef9da0c8_57490143.mp3
+    $command = "$zipExe h $sourcePath"
+    $endReached = $false
+    $errorCount = 0
+    Write-Debug "Checking CRC from $sourcePath..."
+    Invoke-Expression -Command $command | Select-Object -Skip 8 | ForEach-Object {
+        if (-not $endReached) {
+            $crc = $_.Substring(0, 8)
+            $path = $_.Substring(24)
+        } 
+
+        if ($endReached) {
+            # do nothing
+        }
+        elseif ($crc -eq '--------') {
+            $endReached = $true
+        }
+        elseif ($zipCRC[$path] -eq $crc) {
+            # CRC matches
+            # do nothing
+        }
+        elseif ($crc -eq '        ' -or $crc -eq '00000000') {
+            # folder or 0 btye file
+            # supress error
+        }
+        elseif (-not $zipCRC[$path]) {
+            Write-Warning "NOT FOUND -- $path"
+            $errorCount++
+        }
+        else {
+            Write-Warning "CRC MISMATCH -- ARCHIVE CRC: $crc - SOURCE: $($zipCRC[$path]) - $path"
+            $errorCount++
+        }
+    }
+
+    if ($errorCount -gt 0) {
+        Write-Warning "$errorCount error(s) detected. Please check issues before continuing."
+    }
+    else {
+        $elapsedTime = $(Get-Date) - $startTime
+        $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
+        Write-Output "$filePath test complete successfully. ($totalTime elapsed)"
+    }
+}
+
+#####################################################################
+function ArchiveCheckSimple {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string] $filePath
+    )
+
+    $startTime = Get-Date
+    Write-Debug "Testing archive $filePath..."
+    $params = @('t', $filePath)
+    & $zipExe $params
+    if (-not $?) {
+        throw "Error testing archive - $filePath" 
+    }   
+    $elapsedTime = $(Get-Date) - $startTime
+    $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
+    Write-Output "$filePath test complete successfully. ($totalTime elapsed)"
+}
+
+#####################################################################
+function CompressPathToFile {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string] $sourcePath,
+
+        [Parameter(Mandatory = $true)]
+        [string] $archivePath
+    )
+
+    # check for existing zip file
+    if (Test-Path -Path $archivePath) {
+        $answer = Read-Host "$archivePath already exists. (Replace/Update/Skip/Cancel)?"
+        if ($answer -like 'C*') {
+            Write-Output "User cancelled." 
+            exit
+
+        }
+        elseif ($answer -like 'S*') {
+            Write-Output "Write-Output $sourcePath skipped" 
+            return
+        }
+        elseif ($answer -like 'R*') {
+            Remove-Item -Path $archivePath -Force
+        }
+    }
+
+    # zip the source
+    $startTime = Get-Date
+    $params = @('u', $archivePath, $sourcePath)
+    Write-Debug "Archiving $sourcePath to $archivePath..."
+    & $zipExe $params
+    if (-not $?) {
+        Write-Error "Error creating archive, executing: $zipExe $($params -join ' ')"
+        throw
+    }
+    $elapsedTime = $(Get-Date) - $startTime
+    $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
+    Write-Output "$archivePath created. ($totalTime elapsed)"
+
+    # check archive
+    if ($ArchiveCheck -eq 'Simple') {
+        ArchiveCheckSimple -filePath $archivePath
+    }
+    elseif ($ArchiveCheck -eq 'Full') {
+        ArchiveCheckFull -filePath $archivePath -sourcePath $sourcePath
+    }
+}
+
+#####################################################################
+function CopyFileToContainer {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        [string] $filePath,
+
+        [Parameter(Mandatory=$true)]
+        [string] $containerURI
+    )
+    
+
+    # upload file
+    $uri = [uri] $ContainerURI
+    $path = [System.IO.FileInfo] $filePath
+    $destinationURI = 'https://' + $uri.Host + "$($uri.LocalPath)/$($path.Name)" + $uri.Query 
+    
+    Write-Output "Upload $($path.Name) started to $destinationURI ..."
+    # using & command syntax since Invoke-Expression doesn't throw an error
+    $params = @('copy', $filePath, $destinationURI)
+    & $azCopyExe $params
+    if (-not $?) {
+        Write-Error "Error uploading file, executing: $azcopyExe $($params -join ' ')"
+        throw
+    }
+}
+
+#####################################################################
+# MAIN
 
 # check 7z command path
 if ($ZipCommandDir -and -not $ZipCommandDir.EndsWith('\')) {
@@ -109,19 +290,21 @@ $azcopyExe = $AzCopyCommandDir + 'azcopy.exe'
 
 try {
     $null = Invoke-Expression -Command $azcopyExe -ErrorAction SilentlyContinue
-} catch {
+}
+catch {
     Write-Error "Unable to find azcopy.exe command. Please make sure azcopy.exe is in your PATH or use -AzCopyCommandPath to specify azcopy.exe path" -ErrorAction Stop
 }
 
 # login if using managed identities
 if ($UseManagedIdentity) {
     try {
-        $params = @{}
+        $params = @{ }
         if ($Environment) {
-            $params = @{'Environment' = $Environment}
+            $params = @{'Environment' = $Environment }
         }
         Connect-AzAccount -Identity @params
-    } catch {
+    }
+    catch {
         throw "Unable to login using managed identity."
     }
 
@@ -187,136 +370,47 @@ if (-not $(Test-Path -Path $ArchiveTempDir)) {
 if (-not $(Test-Path -Path $SourceFilePath)) {
     Write-Error "Unable to find $SourceFilePath. Please check the -SourcePath and try again." -ErrorAction Stop
 } 
-$sourceFilename = Split-Path -Path $SourceFilePath -Leaf
 
-# determine filename for zip file
-if ($ArchiveFileName) {
-    if (-not $ArchiveFileName.EndsWith('.7z')) {
-        $ArchiveFilePath = $ArchiveTempDir + $ArchiveFileName + '.7z'        
-    }
-} else {
-    $ArchiveFilePath = $ArchiveTempDir + $sourceFilename + '.7z'
+# invalid combination -SeparateEachDirectory will force the use of directory name
+if ($ArchiveFileName -and $SeparateEachDirectory) {
+    throw "-ArchiveFilename and -SeparateEachDirectory can not be used together."
 }
 
-if ($AppendDateToFileName) {
-    $path = [System.IO.FileInfo] $ArchiveFilePath
-    $yyyymmdd = "{0:yyyyMMdd}" -f $(Get-Date)
-    $ArchiveFilePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $yyyymmdd + $path.Extension
-}
+if ($SeparateEachDirectory) {
+    # loop through each directory and upload a separate zip
+    $directories = Get-ChildItem $SourceFilePath | Where-Object { $_.PSIsContainer }
+    foreach ($directory in $directories) {
+        $archivePath = $ArchiveTempDir + $directory.Name + '.7z'
 
-# check for existing zip file
-$updateZipFile = $true
-if (Test-Path -Path $ArchiveFilePath) {
-    $answer = Read-Host "$ArchiveFilePath already exists. (Replace/Update/Skip/Cancel)?"
-    if ($answer -like 'C*') {
-        return
-
-    } elseif ($answer -like 'S*') {
-        $updateZipFile = $false
-
-    } elseif ($answer -like 'R*') {
-        Remove-Item -Path $ArchiveFilePath -Force
-    }
-}
-
-# zip the source
-if ($updateZipFile) {
-    $startTime = Get-Date
-    $params = @('u',$ArchiveFilePath, $SourceFilePath)
-    Write-Verbose "Archiving $SourceFilePath to $ArchiveFilePath..."
-    & $($zipExe) $params
-    if (-not $?) {
-        Write-Error "Error creating archive, executing: $zipExe $($params -join ' ')"
-        throw
-    }
-    $elapsedTime = $(Get-Date) - $startTime
-    $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
-    Write-Output "$ArchiveFilePath created. ($totalTime elapsed)"
-}
-
-# check archive
-if ($ArchiveCheck -eq 'Simple') {
-    $startTime = Get-Date
-    Write-Verbose "Testing archive $ArchiveFilePath..."
-    $params = @('t', $ArchiveFilePath)
-    & $zipExe $params
-    if (-not $?) {
-        throw "Error testing archive - $ArchiveFilePath" 
-    }   
-    $elapsedTime = $(Get-Date) - $startTime
-    $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
-    Write-Output "$ArchiveFilePath test complete successfully. ($totalTime elapsed)"
-    
-} elseif ($ArchiveCheck -eq 'Full') {
-    # load CRC list from zip file
-    $startTime = Get-Date
-    $command = "$zipExe l -slt $ArchiveFilePath"
-    $currentPath = $null
-    $zipCRC = @{}
-    Write-Verbose "Loading CRC from $ArchiveFilePath..."
-    Invoke-Expression -Command $command | ForEach-Object {
-        if ($_.StartsWith('Path')) {
-            $currentPath = $_.Substring($_.IndexOf('=')+2)
-        } elseif ($_.StartsWith('CRC')) {
-            $zipCRC[$currentPath] = $_.Substring($_.IndexOf('=')+2)
+        if ($AppendDateToFileName) {
+            $path = [System.IO.FileInfo] $archivePath
+            $yyyymmdd = "{0:yyyyMMdd}" -f $(Get-Date)
+            $archivePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $yyyymmdd + $path.Extension
         }
-    }
 
-    # get CRC from source filepath and compare against list from zip file
-    # sample CRC: 852DD72D      57490143  temp\20191230_hibt_chicken.mp3_bf969ccfdacaede5b20f6473ef9da0c8_57490143.mp3
-    $command = "$zipExe  h $SourceFilePath"
-    $endReached = $false
-    $errorCount = 0
-    Write-Verbose "Checking CRC from $SourceFilePath..."
-    Invoke-Expression -Command $command | Select-Object -Skip 8 | ForEach-Object {
-        if (-not $endReached) {
-            $crc = $_.Substring(0,8)
-            $path = $_.Substring(24)
-        } 
+        CompressPathToFile -SourcePath $directory.FullName -archivePath $archivePath
+        CopyFileToContainer -filePath $archivePath -ContainerURI $ContainerURI
+        Remove-Item -Path $archivePath -Force
 
-        if ($endReached) {
-            # do nothing
-        } elseif ($crc -eq '--------') {
-            $endReached = $true
-        } elseif ($zipCRC[$path] -eq $crc) {
-            # CRC matches
-            # do nothing
-        } elseif ($crc -eq '        ') {
-            # folder entry
-            # supress error
-        } elseif (-not $zipCRC[$path]) {
-            Write-Warning "NOT FOUND -- $path"
-            $errorCount++
-        } else {
-            Write-Warning "CRC MISMATCH -- ARCHIVE CRC: $crc - SOURCE: $($zipCRC[$path]) - $path"
-            $errorCount++
-        }
-    }
-
-    if ($errorCount -gt 0) {
-        Write-Warning "$errorCount error(s) detected. Please check issues before continuing."
-    } else {
-        $elapsedTime = $(Get-Date) - $startTime
-        $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
-        Write-Output "$ArchiveFilePath test complete successfully. ($totalTime elapsed)"
+        Write-Output "==================== $(Split-Path $archivePath -Leaf) complete. $(Get-Date) ===================="
+        Write-Output ''
     }
 }
+else {
+    $archivePath = $ArchiveTempDir + $ArchiveFileName 
 
-# upload file
-$uri = [uri] $ContainerURI
-if ($uri.Query) {
-    $destinationURI = 'https://' + $uri.Host + "$($uri.LocalPath)/$($ArchiveFileName)" + $uri.Query 
-} else {
-    $destinationURI = $ContainerURI
+    if ($AppendDateToFileName) {
+        $path = [System.IO.FileInfo] $archivePath
+        $yyyymmdd = "{0:yyyyMMdd}" -f $(Get-Date)
+        $archivePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $yyyymmdd + $path.Extension
+    }
+
+    CompressPathToFile -SourcePath $SourceFilePath -ArchiveFilename $archivePath
+    CopyFileToContainer -filePath $archivePath -ContainerURI $ContainerURI
+    Remove-Item -Path $archivePath -Force
+
+    Write-Output "==================== $(Split-Path $archivePath -Leaf) complete. $(Get-Date) ===================="
+    Write-Output ''
 }
 
-Write-Output "Upload started to $destinationURI ..."
-# using & command syntax since Invoke-Expression doesn't throw an error
-$params = @('copy', $ArchiveFilePath, $destinationURI)
-& $azCopyExe $params
-if (-not $?) {
-    Write-Error "Error uploading file, executing: $azcopyExe $($params -join ' ')"
-    throw
-}
-
-Write-Output 'Upload complete.'
+Write-Output "Script Complete. $(Get-Date)"
