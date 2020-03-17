@@ -1,3 +1,50 @@
+<#
+.SYNOPSIS
+Restore an archive from blob. 
+
+.DESCRIPTION
+This script will restore a compressed zip file from blob to a VM file system. If the blob is in the archive tier, it will rehydrate it first, before copying and restoring it.
+
+.PARAMETER StorageAccountName
+Name of the storage account to upload the archive file to. Cannot be used with ContainerURI.
+
+.PARAMETER ContainerName
+Name of the container to upload the archive file to. Cannot be used with ArchiveURI.
+
+.PARAMETER ArchiveFilePath
+Name of the container to upload the archive file to. Cannot be used with ArchiveURI.
+
+.PARAMETER ArchiveURI
+URI of the compressed archive file. Using this parameter assumes that you can only access this file via SAS token. When using ArchiveURI, the file will NOT be rehydrated. For files in an achive tier, the storage account naming convention will need to be used. Cannot be used with -StorageAccountName, -ContainerName, -ManagedIdentity, or -Environment
+
+.PARAMETER DestinationPath
+Path where the archive should be expanded into. This script will create a folder underneath the -DestinationPath, but it will NOT create it. This directory must exists before the script will start.
+
+.PARAMETER WaitForRehydration
+Sleep and wait for the rehydration from archive tier to complete then restore the files. If this is not specified, the rehydration will be requested then the script will exit.
+
+.PARAMETER KeepArchiveFile
+Keeps the archive zip file in the -ArchiveTempDir location after restoring the files. If not specified the zip file will be deleted from the local machine once expanding has completed successfully.
+
+.PARAMETER ArchiveTempDir
+Directory to use for the .7z archive compression to reside. If no directory is specific, the archive will be placed in the TEMP directory specified by the current environment variable.
+
+.PARAMETER ZipCommandDir
+Specifies the directory where the 7z.exe command can be found. If not specified, it will look in the current PATH 
+
+.PARAMETER AzCopyCommandDir
+Specifies the directory where the azcpoy.exe command can be found. If not specified, it will look in the current PATH 
+
+.PARAMETER UseManagedIdentity
+Specifies the use of Managed Identity to authenticate into Azure Powershell APIs and azcopy.exe. If not specified, the AzureCloud is use by default. Cannot be used with 
+
+.PARAMETER Environment
+Specifies the Azure cloud environment to use for authentication. If not specified the AzureCloud is used by default
+
+.EXAMPLE
+RestoreArchive.ps1 -StorageAccountName 'myStorageAccount' -ContainerName 'archive-continer' -ArchiveFilePath 'archive.7z' -DestinationPath c:\restored-archives
+#>
+
 [CmdletBinding()]
 param (
     [Parameter(ParameterSetName = "StorageAccount", Mandatory = $true)]
@@ -12,9 +59,6 @@ param (
     [Parameter(ParameterSetName = "ArchiveURI", Mandatory = $true)]
     [string] $ArchiveURI,
 
-    [Parameter(Mandatory = $false)]
-    [string] $ArchiveTempDir = $env:TEMP,
-
     [Parameter(Mandatory = $true)]
     [string] $DestinationPath,
         
@@ -22,13 +66,22 @@ param (
     [switch] $WaitForRehydration,
 
     [Parameter(Mandatory = $false)]
-    [switch] $UseManagedIdentity,
+    [switch] $KeepArchiveFile,
+
+    [Parameter(Mandatory = $false)]
+    [string] $ArchiveTempDir = $env:TEMP,
 
     [Parameter(Mandatory = $false)]
     [string] $ZipCommandPath = "",
 
     [Parameter(Mandatory = $false)]
-    [string] $AzCopyCommandPath = ""
+    [string] $AzCopyCommandPath = "",
+
+    [Parameter(ParameterSetName = "StorageAccount", Mandatory = $false)]
+    [switch] $UseManagedIdentity,
+
+    [Parameter(ParameterSetName = "StorageAccount", Mandatory = $false)]
+    [string] $Environment
 
 )
 
@@ -169,9 +222,14 @@ if (-not $?) {
 $uri = [uri] $archiveuri
 $fileName = $uri.Segments[$uri.Segments.Count - 1]
 
-& $zipExe x "$($ArchiveTempDir + $fileName)" -"o$DestinationPath -ao" 
+$params = @('x', $($ArchiveTempDir + $fileName),  "-o$DestinationPath", '-aoa')
+& $zipExe $params
 if (-not $?) {
     throw "Error restoring archive - $filePath" 
+}
+
+if (-not $KeepArchiveFile) {
+    Remove-Item "$($ArchiveTempDir + $fileName)" -Force
 }
 
 Write-Output "==================== Restore of $filename to $DestinationPath complete ===================="
