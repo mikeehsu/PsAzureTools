@@ -22,6 +22,9 @@ URI of container. When using ContainerURI, this should contain any SAS token nec
 .PARAMETER ArchiveFileName
 Name of archive flie. This will default to the filename or directory name with a .7z extension when compressing the file(s).
 
+.PARAMETER SeparateEachDirectory
+Separate out each directory in the -SourceFilePath into a separate zip file
+
 .PARAMETER AppendDateToFileName
 Add the current date to the ArchiveFileName
 
