@@ -31,8 +31,8 @@ Directory to use for the .7z archive compression. If no directory is specific, t
 .PARAMETER ArchiveCheck
 Perform a validation check on the created archive file. If no value is specified, validation check will default to 'Simple'
 
-.PARAMETER SetBlobTier
-Set the Blob to the appropriate storage blob tier
+.PARAMETER BlobTier
+Set the Blob to the specified storage blob tier
 
 .PARAMETER ZipCommandDir
 Specifies the directory where the 7z.exe command can be found. If not specified, it will look in the current PATH 
@@ -274,31 +274,6 @@ function CopyFileToContainer {
         Write-Error "Error uploading file, executing: $azcopyExe $($params -join ' ')"
         throw
     }
-}
-
-#####################################################################
-function VerifyBlob {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true)]
-        [string] $archivePath,
-   
-        [Parameter(Mandatory = $true)]
-        [Microsoft.WindowsAzure.Commands.Common.Storage.LazyAzureStorageContext] $context,
-
-        [Parameter(Mandatory = $true)]
-        [string] $ContainerName
-    )
-    
-    $file = Get-ChildItem $archivePath
-    $blob = Get-AzStorageBlob -Context $context -Container $ContainerName -Blob $file.Name
-
-    if ($file.Length -ne $blob.Length) {
-        Write-Error "$archivePath size ($($file.Length)) does not match $($file.Name) Blob size ($($blob.Length))"
-        return $false
-    }
-
-    return $true
 }
 
 #####################################################################
