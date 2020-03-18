@@ -110,11 +110,11 @@ function ArchiveCheckFull {
 
     # load CRC list from zip file
     $startTime = Get-Date
-    $command = "$zipExe l -slt $filePath"
     $currentPath = $null
     $zipCRC = @{ }
     Write-Debug "Loading CRC from $filePath..."
-    Invoke-Expression -Command $command | ForEach-Object {
+    $params = @('l', '-slt', $filePath)
+    & $zipExe $params | ForEach-Object {
         if ($_.StartsWith('Path')) {
             $currentPath = $_.Substring($_.IndexOf('=') + 2)
         }
@@ -125,11 +125,11 @@ function ArchiveCheckFull {
 
     # get CRC from source filepath and compare against list from zip file
     # sample CRC: 852DD72D      57490143  temp\20191230_hibt_chicken.mp3_bf969ccfdacaede5b20f6473ef9da0c8_57490143.mp3
-    $command = "$zipExe h $sourcePath"
     $endReached = $false
     $errorCount = 0
     Write-Debug "Checking CRC from $sourcePath..."
-    Invoke-Expression -Command $command | Select-Object -Skip 8 | ForEach-Object {
+    $params = @('h', $sourcePath)
+    & $zipExe $params | Select-Object -Skip 8 | ForEach-Object {
         if (-not $endReached) {
             $crc = $_.Substring(0, 8)
             $path = $_.Substring(24)
@@ -270,6 +270,31 @@ function CopyFileToContainer {
 }
 
 #####################################################################
+function VerifyBlob {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        [string] $archivePath,
+   
+        [Parameter(Mandatory=$true)]
+        [Microsoft.WindowsAzure.Commands.Common.Storage.LazyAzureStorageContext] $context,
+
+        [Parameter(Mandatory=$true)]
+        [string] $ContainerName
+    )
+    
+    $file = Get-ChildItem $archivePath
+    $blob = Get-AzStorageBlob -Context $context -Container $ContainerName -Blob $file.Name
+
+    if ($file.Length -ne $blob.Length) {
+        Write-Error "$archivePath size ($($file.Length)) does not match $($file.Name) Blob size ($($blob.Length))"
+        return $false
+    }
+
+    return $true
+}
+
+#####################################################################
 # MAIN
 
 # check 7z command path
@@ -390,6 +415,13 @@ if ($SeparateEachDirectory) {
 
         CompressPathToFile -SourcePath $directory.FullName -archivePath $archivePath
         CopyFileToContainer -filePath $archivePath -ContainerURI $ContainerURI
+
+        if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
+            if (-not $(VerifyBlob -archivePath $archivePath -Context $storageAccount.Context -ContainerName $ContainerName)) {
+                throw "Error validating $archivePath at $ContainerURI"
+            }
+        }
+
         Remove-Item -Path $archivePath -Force
 
         Write-Output "==================== $(Split-Path $archivePath -Leaf) complete. $(Get-Date) ===================="
@@ -397,7 +429,11 @@ if ($SeparateEachDirectory) {
     }
 }
 else {
-    $archivePath = $ArchiveTempDir + $ArchiveFileName 
+    if (-not $ArchiveFileName) {
+        $ArchiveFileName = Split-Path $SourceFilePath -Leaf
+    }
+
+    $archivePath = $ArchiveTempDir + $ArchiveFileName + '.7z'
 
     if ($AppendDateToFileName) {
         $path = [System.IO.FileInfo] $archivePath
@@ -405,8 +441,15 @@ else {
         $archivePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $yyyymmdd + $path.Extension
     }
 
-    CompressPathToFile -SourcePath $SourceFilePath -ArchiveFilename $archivePath
+    CompressPathToFile -SourcePath $SourceFilePath -ArchivePath $archivePath
     CopyFileToContainer -filePath $archivePath -ContainerURI $ContainerURI
+
+    if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
+        if (-not $(VerifyBlob -archivePath $archivePath -Context $storageAccount.Context -ContainerName $ContainerName)) {
+            throw "Error validating $archivePath at $ContainerURI"
+        }
+    }
+
     Remove-Item -Path $archivePath -Force
 
     Write-Output "==================== $(Split-Path $archivePath -Leaf) complete. $(Get-Date) ===================="
