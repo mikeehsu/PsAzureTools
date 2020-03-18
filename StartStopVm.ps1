@@ -180,7 +180,7 @@ if ($PSBoundParameters.ContainsKey('SetVmCount')) {
         $vms = $null
 
     } elseif ($runningVms.Count -gt $SetVmCount) {
-        Write-Output "stopping $($runningVms.Count-$SetVmCount) VMs"
+        Write-Output "$($runningVms.Count-$SetVmCount) VMs to stop"
         $Action = 'Stop'
         if ($SetVmCount -eq 0 -and $runningVms.Count-1 -eq 0) {
             # some bug is preventing [0..0] from returning a single element
@@ -190,7 +190,7 @@ if ($PSBoundParameters.ContainsKey('SetVmCount')) {
         }
         
     } elseif ($runningVms.Count -lt $SetVmCount) {
-        Write-Output "starting $($SetVmCount-$runningVms.Count) VMs"
+        Write-Output "$($SetVmCount-$runningVms.Count) VMs to start"
         $Action = 'Start'
         $lastVmIndex = $SetVmCount-$runningVms.Count-1
         if ($lastVmIndex -eq 0) {
