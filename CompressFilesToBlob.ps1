@@ -31,6 +31,9 @@ Directory to use for the .7z archive compression. If no directory is specific, t
 .PARAMETER ArchiveCheck
 Perform a validation check on the created archive file. If no value is specified, validation check will default to 'Simple'
 
+.PARAMETER SetBlobTier
+Set the Blob to the appropriate storage blob tier
+
 .PARAMETER ZipCommandDir
 Specifies the directory where the 7z.exe command can be found. If not specified, it will look in the current PATH 
 
@@ -80,6 +83,10 @@ param (
     [Parameter(Mandatory = $false)]
     [ValidateSet('Simple', 'Full', 'None')]
     [string] $ArchiveCheck = "Simple",
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('Hot', 'Cool', 'Archive')]
+    [string] $BlobTier,
 
     [Parameter(Mandatory = $false)]
     [string] $ZipCommandDir = "",
@@ -246,10 +253,10 @@ function CopyFileToContainer {
 
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string] $filePath,
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string] $containerURI
     )
     
@@ -273,13 +280,13 @@ function CopyFileToContainer {
 function VerifyBlob {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string] $archivePath,
    
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [Microsoft.WindowsAzure.Commands.Common.Storage.LazyAzureStorageContext] $context,
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string] $ContainerName
     )
     
@@ -403,37 +410,14 @@ if ($ArchiveFileName -and $SeparateEachDirectory) {
 
 if ($SeparateEachDirectory) {
     # loop through each directory and upload a separate zip
-    $directories = Get-ChildItem $SourceFilePath | Where-Object { $_.PSIsContainer }
-    foreach ($directory in $directories) {
-        $archivePath = $ArchiveTempDir + $directory.Name + '.7z'
+    $sourcePaths = $(Get-ChildItem $SourceFilePath | Where-Object { $_.PSIsContainer }).FullName
 
-        if ($AppendDateToFileName) {
-            $path = [System.IO.FileInfo] $archivePath
-            $yyyymmdd = "{0:yyyyMMdd}" -f $(Get-Date)
-            $archivePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $yyyymmdd + $path.Extension
-        }
-
-        CompressPathToFile -SourcePath $directory.FullName -archivePath $archivePath
-        CopyFileToContainer -filePath $archivePath -ContainerURI $ContainerURI
-
-        if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
-            if (-not $(VerifyBlob -archivePath $archivePath -Context $storageAccount.Context -ContainerName $ContainerName)) {
-                throw "Error validating $archivePath at $ContainerURI"
-            }
-        }
-
-        Remove-Item -Path $archivePath -Force
-
-        Write-Output "==================== $(Split-Path $archivePath -Leaf) complete. $(Get-Date) ===================="
-        Write-Output ''
-    }
+} else {
+    $sourcePaths = $SourceFilePath
 }
-else {
-    if (-not $ArchiveFileName) {
-        $ArchiveFileName = Split-Path $SourceFilePath -Leaf
-    }
 
-    $archivePath = $ArchiveTempDir + $ArchiveFileName + '.7z'
+foreach ($sourcePath in $sourcePaths) {
+    $archivePath = $ArchiveTempDir + $(Split-Path $sourcePath -Leaf) + '.7z'
 
     if ($AppendDateToFileName) {
         $path = [System.IO.FileInfo] $archivePath
@@ -441,17 +425,28 @@ else {
         $archivePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $yyyymmdd + $path.Extension
     }
 
-    CompressPathToFile -SourcePath $SourceFilePath -ArchivePath $archivePath
+    CompressPathToFile -SourcePath $sourcePath -archivePath $archivePath
     CopyFileToContainer -filePath $archivePath -ContainerURI $ContainerURI
 
     if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
-        if (-not $(VerifyBlob -archivePath $archivePath -Context $storageAccount.Context -ContainerName $ContainerName)) {
-            throw "Error validating $archivePath at $ContainerURI"
+        # verify the file & blob size created
+        $archiveFile = Get-ChildItem $archivePath
+        $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $archiveFile.Name
+        if ($archiveFile.Length -ne $blob.Length) {
+            throw "$($archiveFile.Name) size ($($archiveFile.Length)) does not match $($blob.Name) Blob size ($($blob.Length))"
+            return $false
+        }
+
+        if ($BlobTier) {
+            $blob.ICloudBlob.SetStandardBlobTier($BlobTier)
+            Write-Output "$containerURI/$($blob.Name) tier set to $BlobTier"
         }
     }
 
+    # clean up
     Remove-Item -Path $archivePath -Force
 
+    Write-Output ''
     Write-Output "==================== $(Split-Path $archivePath -Leaf) complete. $(Get-Date) ===================="
     Write-Output ''
 }
