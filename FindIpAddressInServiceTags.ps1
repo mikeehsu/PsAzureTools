@@ -18,7 +18,10 @@ Param (
     [Parameter(Mandatory = $true)]
     [string] $IPAddress,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(ParameterSetName = "API")]
+    [switch] $UseAPI,
+
+    [Parameter(ParameterSetName = "File", Mandatory = $false)]
     [string] $Environment
 )
 
@@ -68,7 +71,6 @@ Requires   : PowerShell v3
 https://www.ryandrane.com
 https://www.ryandrane.com/2016/05/getting-ip-network-information-powershell/
 #>
-
 
     Param
     (
@@ -236,52 +238,76 @@ function IsIpAddressInCIDR {
 ############################################################
 $ErrorActionPreference = "Stop"
 
-if (-not $environment) {
-    $environment = $(Get-AzContext).Environment.Name
+# load the service tags
+if ($UseAPI) {
+    # ensure login
+    try {
+        $context = Get-AzContext -ErrorAction Stop
+        if (-not $context.Environment) {
+            throw "Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
+        }
+    }
+    catch {
+        throw "Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
+    }    
+    $Environment = $context.Environment
+    
+    # get tags across all locations in environment
+    $serviceTags = @()
+    $locations = Get-AzLocation
+    foreach ($location in $locations) {
+        Write-Progress -Activity "Searching for $ipAddress" -Status "Loading ServiceTags for $($location.DisplayName)..."
+        $serviceTags += Get-AzNetworkServiceTag -Location $location.Location
+    }
+
+} else {
+    if (-not $environment) {
+        $environment = $(Get-AzContext).Environment.Name
+    }
+    
+    if ($environment -eq 'AzureCloud') {
+        $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=56519'
+    
+    }
+    elseif ($environment -eq 'AzureUSGovernment') {
+        $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=57063'
+    
+    }
+    elseif ($environment -eq 'AzureGermanCloud') {
+        $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=57064'
+    
+    }
+    elseif ($environment -eq 'AzureChinaCloud') {
+        $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=57062'
+    
+    }
+    else {
+        throw "Invaild Environment $environment. Please use -Environment or ensure that you are logged in with Connect-AzAccount."
+    }
+    
+    Write-Progress "Loading $environment..."
+    
+    # find the link for file
+    $pageHTML = Invoke-WebRequest $url -UseBasicParsing
+    $fileLink = ($pageHTML.Links | Where-Object { $_.outerHTML -like "*click here to download manually*" }).href
+    
+    # extract the filename
+    $pathParts = $fileLink.Split('/')
+    $dirPath = ''
+    if ($env:TEMP) {
+        $dirPath = $env:TEMP + '/'
+    }
+    $serviceTagFilename = $dirPath + $pathParts[$pathParts.count - 1]
+    
+    # download the JSON file to the TEMP directory
+    $null = Invoke-WebRequest $fileLink -PassThru -OutFile $serviceTagFilename
+    $serviceTags = Get-Content -Raw -Path $serviceTagFilename | ConvertFrom-Json    
 }
 
-if ($environment -eq 'AzureCloud') {
-    $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=56519'
-
-}
-elseif ($environment -eq 'AzureUSGovernment') {
-    $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=57063'
-
-}
-elseif ($environment -eq 'AzureGermanCloud') {
-    $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=57064'
-
-}
-elseif ($environment -eq 'AzureChinaCloud') {
-    $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=57062'
-
-}
-else {
-    throw "Invaild Environment $environment"
-}
-
-Write-Output "Searching $environment..."
-
-# find the link for file
-$pageHTML = Invoke-WebRequest $url -UseBasicParsing
-$fileLink = ($pageHTML.Links | Where-Object { $_.outerHTML -like "*click here to download manually*" }).href
-
-# extract the filename
-$pathParts = $fileLink.Split('/')
-$dirPath = ''
-if ($env:TEMP) {
-    $dirPath = $env:TEMP + '/'
-}
-$serviceTagFilename = $dirPath + $pathParts[$pathParts.count - 1]
-
-# download the JSON file to the TEMP directory
-$null = Invoke-WebRequest $fileLink -PassThru -OutFile $serviceTagFilename
-$serviceTags = Get-Content -Raw -Path $serviceTagFilename | ConvertFrom-Json
-
-# $serviceTags = Get-AzNetworkServiceTag -Location eastus2
 
 $found = 0
 foreach ($service in $serviceTags.values) {
+    Write-Progress -Activity "Searching for $ipAddress" -Status "Checking $($service.Name)..."
     foreach ($addressPrefix in $service.properties.addressPrefixes) {
         if ($(IsIpAddressInCIDR -IPAddress $ipaddress -CIDRAddress $addressPrefix)) {
             Write-Output "name          : $($service.name)"
