@@ -53,7 +53,7 @@ param (
     [Parameter(ParameterSetName = "StorageAccount", Mandatory = $true)]
     [string] $ContainerName,
 
-    [Parameter(ParameterSetName = "StorageAccount", Mandatory = $true)]
+    [Parameter(ParameterSetName = "StorageAccount", Mandatory = $false)]
     [string] $ArchiveFilePath,
 
     [Parameter(ParameterSetName = "ArchiveURI", Mandatory = $true)]
@@ -69,13 +69,16 @@ param (
     [switch] $KeepArchiveFile,
 
     [Parameter(Mandatory = $false)]
+    [switch] $RestoreEmptyDirectories,
+
+    [Parameter(Mandatory = $false)]
     [string] $ArchiveTempDir = $env:TEMP,
 
     [Parameter(Mandatory = $false)]
-    [string] $ZipCommandPath = "",
+    [string] $ZipCommandDir = "",
 
     [Parameter(Mandatory = $false)]
-    [string] $AzCopyCommandPath = "",
+    [string] $AzCopyCommandDir = "",
 
     [Parameter(ParameterSetName = "StorageAccount", Mandatory = $false)]
     [switch] $UseManagedIdentity,
@@ -84,6 +87,60 @@ param (
     [string] $Environment
 
 )
+
+#####################################################################
+function RestoreBlobFromURI {
+    param (
+        [parameter(Mandatory = $true)]
+        [string] $archiveURI
+    )
+
+    $params = @('copy', $archiveURI, $script:ArchiveTempDir)
+    & $script:azcopyExe $params
+    if (-not $?) {
+        throw "Error copying  - $archiveURI to $script:ArchiveTempDir" 
+    }
+
+    $uri = [uri] $archiveURI
+    $fileName = $uri.Segments[$uri.Segments.Count - 1]
+
+    $params = @('x', $($script:ArchiveTempDir + $fileName), "-o$script:DestinationPath", '-aoa')
+    & $script:zipExe $params
+    if (-not $?) {
+        throw "Error restoring archive - $($script:ArchiveTempDir + $fileName) to -o$script:DestinationPath" 
+    }
+
+    if (-not $KeepArchiveFile) {
+        Remove-Item "$($script:ArchiveTempDir + $fileName)" -Force
+    }
+
+    Write-Output "==================== Restore of $filename to $script:DestinationPath complete ===================="
+}
+
+#####################################################################
+
+function RestoreBlob {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        $blob
+    )
+
+    while ($blob.ICloudBlob.Properties.StandardBlobTier -eq 'Archive' -or $blob.ICloudBlob.Properties.RehydrationStatus -eq 'PendingToHot') {
+        $blobName = $blob.Name
+        $containerName = $blob.ICloudBlob.container.Name
+
+        Write-Output "$(Get-Date) $blobName - waiting for rehydration... "
+        Start-Sleep 60 # 10 mins
+        $blob = Get-AzStorageBlob -Context $blob.Context -Container $containerName -Blob $blobName
+        if (-not $blob) {
+            throw "Unable to find $blobName in $containerName"
+        }
+    }
+
+    RestoreBlobFromURI -archiveURI $blob.ICloudBlob.Uri.Absoluteuri
+}
 
 #####################################################################
 # MAIN
@@ -95,7 +152,7 @@ if ($ZipCommandDir -and -not $ZipCommandDir.EndsWith('\')) {
 $zipExe = $ZipCommandDir + '7z.exe'
 $null = $(& $zipExe)
 if (-not $?) {
-    throw "Unable to find 7z.exe command. Please make sure 7z.exe is in your PATH or use -ZipCommandPath to specify 7z.exe path"
+    throw "Unable to find 7z.exe command. Please make sure 7z.exe is in your PATH or use -ZipCommandDir to specify 7z.exe path"
 }
 
 # check azcopy path
@@ -108,9 +165,28 @@ try {
     $null = Invoke-Expression -Command $azcopyExe -ErrorAction SilentlyContinue
 }
 catch {
-    Write-Error "Unable to find azcopy.exe command. Please make sure azcopy.exe is in your PATH or use -AzCopyCommandPath to specify azcopy.exe path" -ErrorAction Stop
+    throw "Unable to find azcopy.exe command. Please make sure azcopy.exe is in your PATH or use -AzCopyCommandDir to specify azcopy.exe path"
 }
 
+if ($RestoreEmptyDirectories -and $ArchiveFilePath) {
+    throw  "Incompatible parameters -RestoreEmptyDirectories can not be used with -ArchiveFilePath"
+}
+
+if (-not ($RestoreEmptyDirectories -or $ArchiveFilePath)) {
+    throw  "-ArchiveFilePath or -RestoreEmptyDirectories must be provided"
+}
+
+if ($ArchiveTempDir -and -not $ArchiveTempDir.EndsWith('\')) {
+    $ArchiveTempDir += '\'
+}
+if (-not $(Test-Path -Path $ArchiveTempDir)) {
+    throw "Unable to find $ArchiveTempDir. Please check the -ArchiveTempDir and try again."
+} 
+
+# check destination filepath
+if (-not $(Test-Path -Path $DestinationPath)) {
+    throw "Unable to find $DestinationPath. Please check the -DestinationPath and try again."
+} 
 
 # login if using managed identities
 if ($UseManagedIdentity) {
@@ -145,35 +221,66 @@ if ($UseManagedIdentity) {
     }
 }
 
+if ($ArchiveURI) {
+    RestoreFile -archiveURI $ArchiveURI
+    return
+}
 
-if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') {
-    # login to powershell az sdk
-    try {
-        $result = Get-AzContext -ErrorAction Stop
-        if (-not $result.Environment) {
-            throw "Use of -StorageAccount parameter set requires logging in your current sessions first. Please use Connect-AzAccount to login and Select-AzSubscriptoin to set the proper subscription context before proceeding."
-        }
-    }
-    catch {
+# remain code relates to $PSCmdlet.ParameterSetName of 'StorageAccount')
+# login to powershell az sdk
+try {
+    $result = Get-AzContext -ErrorAction Stop
+    if (-not $result.Environment) {
         throw "Use of -StorageAccount parameter set requires logging in your current sessions first. Please use Connect-AzAccount to login and Select-AzSubscriptoin to set the proper subscription context before proceeding."
     }
+}
+catch {
+    throw "Use of -StorageAccount parameter set requires logging in your current sessions first. Please use Connect-AzAccount to login and Select-AzSubscriptoin to set the proper subscription context before proceeding."
+}
 
-    $resource = Get-AzResource -ResourceType 'Microsoft.Storage/storageAccounts' -Name $StorageAccountName
-    if (-not $resource) {
-        throw "StorageAccount ($StorageAccountName) not found."
-    }
+$resource = Get-AzResource -ResourceType 'Microsoft.Storage/storageAccounts' -Name $StorageAccountName
+if (-not $resource) {
+    throw "StorageAccount ($StorageAccountName) not found."
+}
 
-    $storageAccount = Get-AzStorageAccount -ResourceGroupName $resource.ResourceGroupName -AccountName $StorageAccountName
-    if (-not $storageAccount) {
-        throw "Error getting StorageAccount info $StorageAccountName"
-    }
+$storageAccount = Get-AzStorageAccount -ResourceGroupName $resource.ResourceGroupName -AccountName $StorageAccountName
+if (-not $storageAccount) {
+    throw "Error getting StorageAccount info $StorageAccountName"
+}
 
-    $container = Get-AzStorageContainer -Name $ContainerName -Context $storageAccount.context
-    if (-not $container) {
-        throw "Error getting container info for $ContainerName - "
-    }
+$container = Get-AzStorageContainer -Name $ContainerName -Context $storageAccount.context
+if (-not $container) {
+    throw "Error getting container info for $ContainerName - "
+}
 
+# restore a single archive file
+if ($ArchiveFilePath) {
     $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $ArchiveFilePath
+    RestoreBlob -blob $blob
+    return
+}
+
+if (-not $RestoreEmptyDirectories) {
+    return
+}
+
+# restore any empty directories
+$archiveBlobNames = @()
+$dirs = Get-ChildItem $DestinationPath | Where-Object { $_.PSIsContainer }
+foreach ($dir in $dirs) {
+    if ($(Get-ChildItem $dir).Count -eq 0) {
+        $archiveBlobNames += $dir.Name + '.7z'
+    }
+}
+
+if (-not $archiveBlobNames) {
+    Write-Output "No empty directories found. Nothing to do."
+    return
+}
+
+$jobs = @()
+foreach ($archiveBlobName in $archiveBlobNames) {
+    $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $archiveBlobName
     if (-not $blob) {
         throw "Unable to find $ArchiveFilePath in $ContainerName"
     }
@@ -187,49 +294,57 @@ if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') {
 
         if (-not $WaitForRehydration) {
             Write-Output "File is rehydrating - current status: $($blob.ICloudBlob.Properties.RehydrationStatus)"
-            Write-Output "Please check again later."
-            return
         }
-
-        do {
-            Start-Sleep 600 # 10 mins
-            $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $ArchiveFilePath
-            Write-Output "$(Get-Date) - $($blob.Name) - $($blob.ICloudBlob.Properties.StandardBlobTier) - $($blob.ICloudBlob.Properties.RehydrationStatus)"
-        } until ($blob.ICloudBlob.Properties.StandardBlobTier -ne 'Archive' -or $blob.ICloudBlob.Properties.RehydrationStatus -ne 'PendingToHot')
     }
 
-    $ArchiveURI = $blob.ICloudBlob.Uri.Absoluteuri
+    # skip existing jobs
+    $job = Get-Job -Name $archiveBlobName -ErrorAction SilentlyContinue
+    if ($job -and $job.State -eq 'Running') {
+        Write-Output "$archiveBlobName already running - adding job to watch list"
+        $jobs += $job
+        continue 
+    }
+
+    # create new job
+    $params = @{
+        Name         = $archiveBlobName
+        ScriptBlock  = { Param ($p1, $p2, $p3, $p4, $p5, $p6) .\RestoreArchive.ps1 -StorageAccountName $p1 -ContainerName $p2 -ArchiveFilePath $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 }
+        ArgumentList = $StorageAccountName, $ContainerName, $archiveBlobName, $DestinationPath, $AzCopyCommandDir, $ZipCommandDir
+    }
+    $jobs += Start-Job @params
+    Write-Output "$archiveBlobName job started"
 }
 
-# check -ArchiveTempFilePath
-if ($ArchiveTempDir -and -not $ArchiveTempDir.EndsWith('\')) {
-    $ArchiveTempDir += '\'
-}
-if (-not $(Test-Path -Path $ArchiveTempDir)) {
-    throw "Unable to find $ArchiveTempDir. Please check the -ArchiveTempDir and try again."
-} 
+Write-Output "Waiting for jobs to finish..."
+$jobIds = [System.Collections.ArrayList] @($jobs.Id)
+do {
+    Start-Sleep 60
 
-# check source filepath
-if (-not $(Test-Path -Path $DestinationPath)) {
-    throw "Unable to find $DestinationPath. Please check the -DestinationPath and try again."
-} 
+    $CompleteJobIds = @()
+    foreach ($jobId in $jobIds) {
+        $job = Get-Job -Id $jobId
+        if ($job.State -eq 'Running') {
+            if ($job.HasMoreData) {
+                $job | Receive-Job | ForEach-Object {
+                    Write-Output "$($job.Name)> $_"
+                }
+            }
+        }
+        else {
+            $job | Receive-Job | ForEach-Object {
+                Write-Output "$($job.Name)> $_"
+            }
+            Write-Output "$($job.Name)> $($job.ChildJobs[0].Error)"
+            Write-Output "$($job.Name)> ==================== $($job.Name) $($job.State) $($job.StatusMessage) ===================="
+            Remove-Job $job
+            $CompleteJobIds += $jobId
+        }    
+    }
 
-& $azcopyExe copy $ArchiveURI $ArchiveTempDir
-if (-not $?) {
-    throw "Error retrieving archive - $filePath" 
-}
+    # remove any completed job from array
+    foreach ($jobId in $CompleteJobIds) {
+        $jobIds.Remove($jobId)
+    } 
+} until (-not $jobIds)
 
-$uri = [uri] $archiveuri
-$fileName = $uri.Segments[$uri.Segments.Count - 1]
-
-$params = @('x', $($ArchiveTempDir + $fileName),  "-o$DestinationPath", '-aoa')
-& $zipExe $params
-if (-not $?) {
-    throw "Error restoring archive - $filePath" 
-}
-
-if (-not $KeepArchiveFile) {
-    Remove-Item "$($ArchiveTempDir + $fileName)" -Force
-}
-
-Write-Output "==================== Restore of $filename to $DestinationPath complete ===================="
+Write-Output "Script complete."
