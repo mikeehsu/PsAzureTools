@@ -26,7 +26,7 @@ Name of archive flie. This will default to the filename or directory name with a
 Separate out each directory in the -SourceFilePath into a separate zip file
 
 .PARAMETER AppendDateToFileName
-Add the current date to the ArchiveFileName
+Add the current date and time to the ArchiveFileName
 
 .PARAMETER ArchiveTempDir
 Directory to use for the .7z archive compression. If no directory is specific, the archive will be placed in the TEMP directory specified by the current environment variable.
@@ -72,7 +72,7 @@ param (
     [string] $ContainerURI,
 
     [Parameter(Mandatory = $false)]
-    [switch] $AppendDateToFileName,
+    [string] $AppendDateToFileName = 'Date',
 
     [Parameter(Mandatory = $false)]
     [string] $ArchiveTempDir = $env:TEMP,
@@ -399,8 +399,12 @@ foreach ($sourcePath in $sourcePaths) {
 
     if ($AppendDateToFileName) {
         $path = [System.IO.FileInfo] $archivePath
-        $yyyymmdd = "{0:yyyyMMdd}" -f $(Get-Date)
-        $archivePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $yyyymmdd + $path.Extension
+        if ($AppendDateToFileName -eq 'Time') {
+            $dateStr = "{0:yyyyMMddHHmmss}" -f $(Get-Date)
+        } else {
+            $dateStr = "{0:yyyyMMdd}" -f $(Get-Date)
+        }
+        $archivePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $dateStr + $path.Extension
     }
 
     CompressPathToFile -SourcePath $sourcePath -archivePath $archivePath
