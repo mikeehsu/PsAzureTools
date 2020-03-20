@@ -72,6 +72,9 @@ param (
     [switch] $RestoreEmptyDirectories,
 
     [Parameter(Mandatory = $false)]
+    [switch] $CreateLogFile,
+
+    [Parameter(Mandatory = $false)]
     [string] $ArchiveTempDir = $env:TEMP,
 
     [Parameter(Mandatory = $false)]
@@ -89,22 +92,44 @@ param (
 )
 
 #####################################################################
+function LogOutput
+{
+    [CmdletBinding()]
+    param (
+        [Parameter(Position=0)]
+        [string] $message,
+
+        [Parameter(Position=1)]
+        [string] $blobName
+    )
+
+    $logFile = $script:DestinationPath + $blobName + '.log'
+
+    $output = "$(Get-Date) $message"
+
+    $output | Out-File -Path $logFile -Append
+    Write-Output $output
+}
+
+#####################################################################
 function RestoreBlobFromURI {
     param (
         [parameter(Mandatory = $true)]
         [string] $archiveURI
     )
 
+    $uri = [uri] $archiveURI
+    $fileName = $uri.Segments[$uri.Segments.Count - 1]
+
     $params = @('copy', $archiveURI, $script:ArchiveTempDir)
+    LogOutput -BlobName $fileName -Message "$script:azcopyExe $($params -join ' ') started."
     & $script:azcopyExe $params
     if (-not $?) {
         throw "Error copying  - $archiveURI to $script:ArchiveTempDir" 
     }
 
-    $uri = [uri] $archiveURI
-    $fileName = $uri.Segments[$uri.Segments.Count - 1]
-
     $params = @('x', $($script:ArchiveTempDir + $fileName), "-o$script:DestinationPath", '-aoa')
+    LogOutput -BlobName $fileName -Message "$script:zipExe $($params -join ' ') started. "
     & $script:zipExe $params
     if (-not $?) {
         throw "Error restoring archive - $($script:ArchiveTempDir + $fileName) to -o$script:DestinationPath" 
@@ -114,7 +139,7 @@ function RestoreBlobFromURI {
         Remove-Item "$($script:ArchiveTempDir + $fileName)" -Force
     }
 
-    Write-Output "==================== Restore of $filename to $script:DestinationPath complete ===================="
+    LogOutput -BlobName $fileName -Message "==================== Restore of $filename to $script:DestinationPath complete ===================="
 }
 
 #####################################################################
@@ -131,10 +156,11 @@ function RestoreBlob {
         $blobName = $blob.Name
         $containerName = $blob.ICloudBlob.container.Name
 
-        Write-Output "$(Get-Date) $blobName - waiting for rehydration... "
-        Start-Sleep 60 # 10 mins
+        LogOutput "$blobName - waiting for rehydration (update in 10 mins)... "
+        Start-Sleep 600 # 10 mins
         $blob = Get-AzStorageBlob -Context $blob.Context -Container $containerName -Blob $blobName
         if (-not $blob) {
+            LogOutput -BlobName $blobName -Message "Unable to find $blobName in $containerName"
             throw "Unable to find $blobName in $containerName"
         }
     }
@@ -184,9 +210,12 @@ if (-not $(Test-Path -Path $ArchiveTempDir)) {
 } 
 
 # check destination filepath
+if ($DestinationPath -and -not $DestinationPath.EndsWith('\')) {
+    $DestinationPath += '\'
+}
 if (-not $(Test-Path -Path $DestinationPath)) {
     throw "Unable to find $DestinationPath. Please check the -DestinationPath and try again."
-} 
+}
 
 # login if using managed identities
 if ($UseManagedIdentity) {
@@ -282,25 +311,25 @@ $jobs = @()
 foreach ($archiveBlobName in $archiveBlobNames) {
     $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $archiveBlobName
     if (-not $blob) {
-        throw "Unable to find $ArchiveFilePath in $ContainerName"
+        throw "Unable to find $archiveBlobName in $ContainerName"
     }
 
     # rehydrate blob if necessary
     if ($blob.ICloudBlob.Properties.StandardBlobTier -eq 'Archive') {
         if (-not $blob.ICloudBlob.Properties.RehydrationStatus) {
             $blob.ICloudBlob.SetStandardBlobTier("Hot", “Standard”)
-            Write-Output "Rehydrate requested for: $($blob.Name)"
+            LogOutput -BlobName $archiveBlobName -Message "Rehydrate requested for: $($blob.Name)"
         }
 
         if (-not $WaitForRehydration) {
-            Write-Output "File is rehydrating - current status: $($blob.ICloudBlob.Properties.RehydrationStatus)"
+            LogOutput -BlobName $archiveBlobName -Message "File is rehydrating - current status: $($blob.ICloudBlob.Properties.RehydrationStatus)"
         }
     }
 
     # skip existing jobs
     $job = Get-Job -Name $archiveBlobName -ErrorAction SilentlyContinue
     if ($job -and $job.State -eq 'Running') {
-        Write-Output "$archiveBlobName already running - adding job to watch list"
+        LogOutput -BlobName $archiveBlobNames "$archiveBlobName (Job:$($job.Id)) already running, staus will be displayed"
         $jobs += $job
         continue 
     }
@@ -312,12 +341,12 @@ foreach ($archiveBlobName in $archiveBlobNames) {
         ArgumentList = $StorageAccountName, $ContainerName, $archiveBlobName, $DestinationPath, $AzCopyCommandDir, $ZipCommandDir
     }
     $jobs += Start-Job @params
-    Write-Output "$archiveBlobName job started"
+    LogOutput -BlobName $archiveBlobName -Message "$archiveBlobName job started"
 }
 
-Write-Output "Waiting for jobs to finish..."
 $jobIds = [System.Collections.ArrayList] @($jobs.Id)
 do {
+    Write-Output "$(Get-Date) Waiting for jobs $($jobIds -join ', ')..."
     Start-Sleep 60
 
     $CompleteJobIds = @()
@@ -326,16 +355,16 @@ do {
         if ($job.State -eq 'Running') {
             if ($job.HasMoreData) {
                 $job | Receive-Job | ForEach-Object {
-                    Write-Output "$($job.Name)> $_"
+                    LogOutput -BlobName $job.name -Message "$($job.Name)> $_"
                 }
             }
         }
         else {
             $job | Receive-Job | ForEach-Object {
-                Write-Output "$($job.Name)> $_"
+                LogOutput -BlobName $job.name -Message "$($job.Name)> $_"
             }
-            Write-Output "$($job.Name)> $($job.ChildJobs[0].Error)"
-            Write-Output "$($job.Name)> ==================== $($job.Name) $($job.State) $($job.StatusMessage) ===================="
+            LogOutput -BlobName $job.name "$($job.Name)> $($job.ChildJobs[0].Error)"
+            LogOutput -BlobName $job.name "$($job.Name)> ==================== $($job.Name) $($job.State) $($job.StatusMessage) ===================="
             Remove-Job $job
             $CompleteJobIds += $jobId
         }    
