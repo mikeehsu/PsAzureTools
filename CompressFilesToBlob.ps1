@@ -37,6 +37,9 @@ Perform a validation check on the created archive file. If no value is specified
 .PARAMETER BlobTier
 Set the Blob to the specified storage blob tier
 
+.PARAMETER CleanUpDir
+After upload move files to. Valid values are Delete, RecycleBin or a directory path.
+
 .PARAMETER ZipCommandDir
 Specifies the directory where the 7z.exe command can be found. If not specified, it will look in the current PATH 
 
@@ -90,6 +93,9 @@ param (
     [Parameter(Mandatory = $false)]
     [ValidateSet('Hot', 'Cool', 'Archive')]
     [string] $BlobTier,
+
+    [Parameter(Mandatory = $false)]
+    [string] $CleanUpDir,
 
     [Parameter(Mandatory = $false)]
     [string] $ZipCommandDir = "",
@@ -368,6 +374,19 @@ if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') {
     $ContainerURI = $storageAccount.PrimaryEndpoints.Blob + $ContainerName
 }
 
+# check -CleanUpDir parameter
+if (-not $CleanUpDir) {
+    # do nothing
+}
+elseif ($CleanUpDir -eq 'Delete' -or $CleanUpDir -eq 'RecycleBin') {
+        # do nothing
+
+} else {
+    if (-not (Test-Path $CleanUpDir -PathType Container)) {
+        throw "-CleanupDir $CleanUpDir is not valid. Must be either Delete, RecycleBin or a valid directory."
+    }
+}
+
 # check -ArchiveTempFilePath
 if ($ArchiveTempDir -and -not $ArchiveTempDir.EndsWith('\')) {
     $ArchiveTempDir += '\'
@@ -423,10 +442,27 @@ foreach ($sourcePath in $sourcePaths) {
             $blob.ICloudBlob.SetStandardBlobTier($BlobTier)
             Write-Output "$containerURI/$($blob.Name) tier set to $BlobTier"
         }
+    
     }
 
-    # clean up
+    # clean up zip file
     Remove-Item -Path $archivePath -Force
+
+    # clean up source files
+    if ($CleanUpDir -eq 'Delete') {
+        Remove-Item -Path $sourcePath -Recurse -Force
+        Write-Output "$sourcePath deleted"
+    }
+    elseif ($CleanUpDir -eq 'RecycleBin') {
+        $shell = new-object -comobject "Shell.Application"
+        $item = $shell.Namespace(0).ParseName($SourcePath)
+        $item.InvokeVerb("delete")
+        Write-Output "$sourcePath removed to Recycle Bin"
+
+    } elseif ($CleanUpDir) {
+        Move-Item -Path $sourcePath -Destination $CleanUpDir
+        Write-Output "$sourcePath moved to $CleanupDir"
+    }
 
     Write-Output ''
     Write-Output "==================== $(Split-Path $archivePath -Leaf) complete. $(Get-Date) ===================="
