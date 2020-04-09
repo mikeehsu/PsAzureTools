@@ -3,25 +3,34 @@
 Search Service Tags for an IP Address
 
 .DESCRIPTION
-Searches through the weekly Service Tags file publications for a specific IP Address. Links to the publications can be found here: https://docs.microsoft.com/en-us/azure/virtual-network/security-overview#service-tags-in-on-premises
+Searches through the Sevice Tag listings for a specific IP Address. 
 
 .PARAMETER IPAddress
 IP Address to search for
 
+.PARAMETER UseAPI
+If specified, the script will retrieve the Service Tags from the new Powershell SDK using your current Azure subscription context. The default is to search through the weekly Service Tags file publications at: https://docs.microsoft.com/en-us/azure/virtual-network/security-overview#service-tags-in-on-premises
+
 .PARAMETER Environment
-Environment to search for. If an environment is not provided the current environment in context is used.
+Environment to search in. If an environment is not provided the current environment in context is used.
+
+.EXAMPLE
+FindIpAddressInServiceTags.ps1 40.90.23.208
+
+.EXAMPLE
+FindIpAddressInServiceTags.ps1 40.90.23.208 -UseAPI
 #>
 
 [CmdletBinding()]
 
 Param (
-    [Parameter(Mandatory = $true)]
+    [Parameter(Position=0, Mandatory = $true)]
     [string] $IPAddress,
 
-    [Parameter(ParameterSetName = "API")]
+    [Parameter(Mandatory = $false)]
     [switch] $UseAPI,
 
-    [Parameter(ParameterSetName = "File", Mandatory = $false)]
+    [Parameter(Mandatory = $false)]
     [string] $Environment
 )
 
@@ -250,7 +259,13 @@ if ($UseAPI) {
     catch {
         throw "Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
     }    
-    $Environment = $context.Environment
+    
+    if ($Environment -and $Environment -ne $context.Environment.Name) {
+        throw "-Environment must be the same as current context when -UseAPI is used. Please remove -Environment or -UseAPI."
+    } else {
+        $Environment = $context.Environment.Name
+
+    }    
     
     # get tags across all locations in environment
     $serviceTags = @()
