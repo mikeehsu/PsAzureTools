@@ -127,8 +127,10 @@ function IntegrityCheckFull {
         [string] $sourcePath
     )
 
+    # start a timer
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     # load CRC list from zip file
-    $startTime = Get-Date
     $currentPath = $null
     $zipCRC = @{ }
     Write-Debug "Loading CRC from $filePath..."
@@ -181,12 +183,10 @@ function IntegrityCheckFull {
     }
 
     if ($errorCount -gt 0) {
-        Write-Warning "$errorCount error(s) detected. $itemsChecked items checked. Please check issues before continuing."
+        Write-Warning "$errorCount error(s) detected. $itemsChecked items checked. Please check issues before continuing. ($($stopwatch.Elapsed))"
     }
     else {
-        $elapsedTime = $(Get-Date) - $startTime
-        $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
-        Write-Output "$filePath full test complete successfully. $itemsChecked items checked. ($totalTime elapsed)"
+        Write-Output "$filePath full integrity check completed successfully. $itemsChecked items checked. ($($stopwatch.Elapsed))"
     }
 }
 
@@ -199,13 +199,15 @@ function IntegrityCheckSimple {
         [string] $filePath
     )
 
-    $stopwatch =  [system.diagnostics.stopwatch]::StartNew()
+    # start a timer
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     $params = @('t', $filePath)
     & $zipExe $params
     if (-not $?) {
         throw "Error testing archive - $filePath" 
     }   
-    Write-Output "$filePath test complete successfully. ($($stopwatch.elapsed))"
+    Write-Output "$filePath simple integrity check completed successfully. ($($stopwatch.elapsed))"
 }
 
 #####################################################################
@@ -298,7 +300,6 @@ function CopyFileToContainer {
 
 }
 
-
 #####################################################################
 Function Test-IsFileLocked {
 
@@ -335,6 +336,38 @@ Function Test-IsFileLocked {
     }
 }
 
+#####################################################################
+Function CleanUpSource {
+
+    [cmdletbinding()]
+    Param (
+        [Parameter(Mandatory=$True)]
+        [string] $sourcePath,
+
+        [Parameter(Mandatory=$True)]
+        [string] $cleanUpDir
+    )
+
+    # start a timer
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    # clean up source files
+    if ($CleanUpDir -eq 'Delete') {
+        Remove-Item -Path $sourcePath -Recurse -Force
+        Write-Output "$sourcePath deleted ($($stopwatch.Elapsed))"
+    }
+    elseif ($CleanUpDir -eq 'RecycleBin') {
+        $shell = New-Object -comobject "Shell.Application"
+        $item = $shell.Namespace(0).ParseName($SourcePath)
+        $item.InvokeVerb("delete")
+        Write-Output "$sourcePath removed to Recycle Bin ($($stopwatch.Elapsed))"
+
+    } elseif ($CleanUpDir) {
+        Move-Item -Path $sourcePath -Destination $CleanUpDir
+        Write-Output "$sourcePath moved to $CleanupDir ($($stopwatch.Elapsed))"
+    }
+
+}
 #####################################################################
 # MAIN
 
@@ -497,17 +530,23 @@ foreach ($sourcePath in $sourcePaths) {
         $archivePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $dateStr + $path.Extension
     }
 
+    Write-Output ''
+    Write-Output "==================== $(Split-Path $archivePath -Leaf) started. $(Get-Date) ===================="
+    Write-Output ''
+
     CompressPathToBlob -SourcePath $sourcePath -archivePath $archivePath
     CopyFileToContainer -filePath $archivePath -ContainerURI $ContainerURI
 
     if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
         # verify the file & blob size created
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $archiveFile = Get-ChildItem $archivePath
         $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $archiveFile.Name
         if ($archiveFile.Length -ne $blob.Length) {
             Write-Error "$($archiveFile.Name) size ($($archiveFile.Length)) does not match $($blob.Name) Blob size ($($blob.Length))"
             throw
         }
+        Write-Output "$($archiveFile.Name) blob copy verified successfully. ($($stopwatch.Elapsed))"
 
         if ($BlobTier) {
             $blob.ICloudBlob.SetStandardBlobTier($BlobTier)
@@ -517,22 +556,7 @@ foreach ($sourcePath in $sourcePaths) {
  
     # clean up zip file
     Remove-Item -Path $archivePath -Force
-
-    # clean up source files
-    if ($CleanUpDir -eq 'Delete') {
-        Remove-Item -Path $sourcePath -Recurse -Force
-        Write-Output "$sourcePath deleted"
-    }
-    elseif ($CleanUpDir -eq 'RecycleBin') {
-        $shell = New-Object -comobject "Shell.Application"
-        $item = $shell.Namespace(0).ParseName($SourcePath)
-        $item.InvokeVerb("delete")
-        Write-Output "$sourcePath removed to Recycle Bin"
-
-    } elseif ($CleanUpDir) {
-        Move-Item -Path $sourcePath -Destination $CleanUpDir
-        Write-Output "$sourcePath moved to $CleanupDir"
-    }
+    CleanUpSource -sourcePath $sourcePath -cleanUpDir $CleanUpDir
 
     Write-Output ''
     Write-Output "==================== $(Split-Path $archivePath -Leaf) complete. $(Get-Date) ===================="
