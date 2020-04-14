@@ -3,42 +3,40 @@
 Compress files in a directory and upload to storage container blob. 
 
 .DESCRIPTION
-This script will compress a file or directory using 7-Zip and upload it to a storage container blob using AzCopy.
-The was meant for use with automation tools to archive large directory or flies to save on storage costs vs keeping
-the files on the local VM disks.
+This script will compress a file or directory using 7-Zip and upload it to a storage container blob using AzCopy. The was meant for use with automation tools to archive large directory or flies to save on storage costs vs keeping the files on the local VM disks.
 
 .PARAMETER SourceFilePath
-Source path on the local machine to archive
+Source path on the local machine to compress
 
 .PARAMETER StorageAccountName
-Name of the storage account to upload the archive file to. Cannot be used with ContainerURI.
+Name of the storage account to upload the compressed file to. Cannot be used with ContainerURI.
 
 .PARAMETER ContainerName
-Name of the container to upload the archive file to. Cannot be used with ContainerURI
+Name of the container to upload the compressed file to. Cannot be used with ContainerURI
 
 .PARAMETER ContainerURI
 URI of container. When using ContainerURI, this should contain any SAS token necessary to upload the archive. Cannot be used with -StorageAccountName, -ContainerName, -ManagedIdentity, or -Environment
 
-.PARAMETER ArchiveFileName
+.PARAMETER BlobName
 Name of archive flie. This will default to the filename or directory name with a .7z extension when compressing the file(s).
 
 .PARAMETER SeparateEachDirectory
 Separate out each directory in the -SourceFilePath into a separate zip file
 
-.PARAMETER AppendDateToFileName
-Add the current date and time to the ArchiveFileName
+.PARAMETER AppendToBlobName
+Append the current date or datetime to the BlobName
 
-.PARAMETER ArchiveTempDir
-Directory to use for the .7z archive compression. If no directory is specific, the archive will be placed in the TEMP directory specified by the current environment variable.
+.PARAMETER CompressTempDir
+Directory to use for the .7z compression. If no directory is specific, the archive will be placed in the TEMP directory specified by the current environment variable.
 
-.PARAMETER ArchiveCheck
-Perform a validation check on the created archive file. If no value is specified, validation check will default to 'Simple'
+.PARAMETER IntegrityCheck
+Perform a validation check on the created compressed file. If no value is specified, validation check will default to 'Simple'
 
 .PARAMETER BlobTier
 Set the Blob to the specified storage blob tier
 
 .PARAMETER CleanUpDir
-After upload move files to. Valid values are Delete, RecycleBin or a directory path.
+After upload move files to certain location. Valid values are Delete, RecycleBin or a directory path.
 
 .PARAMETER ZipCommandDir
 Specifies the directory where the 7z.exe command can be found. If not specified, it will look in the current PATH 
@@ -47,7 +45,7 @@ Specifies the directory where the 7z.exe command can be found. If not specified,
 Specifies the directory where the azcpoy.exe command can be found. If not specified, it will look in the current PATH 
 
 .PARAMETER UseManagedIdentity
-Specifies the use of Managed Identity to authenticate into Azure Powershell APIs and azcopy.exe. If not specified, the AzureCloud is use by default. Cannot be used with 
+Specifies the use of Managed Identity to authenticate into Azure Powershell APIs and azcopy.exe. If not specified, the AzureCloud is use by default.
 
 .PARAMETER Environment
 Specifies the Azure cloud environment to use for authentication. If not specified the AzureCloud is used by default
@@ -75,20 +73,25 @@ param (
     [string] $ContainerURI,
 
     [Parameter(Mandatory = $false)]
-    [string] $AppendDateToFileName = 'Date',
+    [string] $BlobName,
 
     [Parameter(Mandatory = $false)]
-    [string] $ArchiveTempDir = $env:TEMP,
+    [ValidateSet('Date', 'Time')]
+    [string] $AppendToBlobName,
 
     [Parameter(Mandatory = $false)]
-    [string] $ArchiveFileName,
+    [ValidateSet(0,1,2,3,4,5,6,7,8,9)]
+    [int] $CompressionLevel = 5,
+
+    [Parameter(Mandatory = $false)]
+    [string] $CompressTempDir = $env:TEMP,
 
     [Parameter(Mandatory = $false)]
     [switch] $SeparateEachDirectory,
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('Simple', 'Full', 'None')]
-    [string] $ArchiveCheck = "Simple",
+    [string] $IntegrityCheck = "Simple",
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('Hot', 'Cool', 'Archive')]
@@ -113,7 +116,7 @@ param (
 
 #####################################################################
 
-function ArchiveCheckFull {
+function IntegrityCheckFull {
 
     [CmdletBinding()]
     param (
@@ -142,6 +145,7 @@ function ArchiveCheckFull {
     # get CRC from source filepath and compare against list from zip file
     # sample CRC: 852DD72D      57490143  temp\20191230_hibt_chicken.mp3_bf969ccfdacaede5b20f6473ef9da0c8_57490143.mp3
     $endReached = $false
+    $itemsChecked = 0
     $errorCount = 0
     Write-Debug "Checking CRC from $sourcePath..."
     $params = @('h', $sourcePath)
@@ -173,20 +177,21 @@ function ArchiveCheckFull {
             Write-Warning "CRC MISMATCH -- ARCHIVE CRC: $crc - SOURCE: $($zipCRC[$path]) - $path"
             $errorCount++
         }
+        $itemsChecked++
     }
 
     if ($errorCount -gt 0) {
-        Write-Warning "$errorCount error(s) detected. Please check issues before continuing."
+        Write-Warning "$errorCount error(s) detected. $itemsChecked items checked. Please check issues before continuing."
     }
     else {
         $elapsedTime = $(Get-Date) - $startTime
         $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
-        Write-Output "$filePath test complete successfully. ($totalTime elapsed)"
+        Write-Output "$filePath full test complete successfully. $itemsChecked items checked. ($totalTime elapsed)"
     }
 }
 
 #####################################################################
-function ArchiveCheckSimple {
+function IntegrityCheckSimple {
 
     [CmdletBinding()]
     param (
@@ -194,20 +199,17 @@ function ArchiveCheckSimple {
         [string] $filePath
     )
 
-    $startTime = Get-Date
-    Write-Debug "Testing archive $filePath..."
+    $stopwatch =  [system.diagnostics.stopwatch]::StartNew()
     $params = @('t', $filePath)
     & $zipExe $params
     if (-not $?) {
         throw "Error testing archive - $filePath" 
     }   
-    $elapsedTime = $(Get-Date) - $startTime
-    $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
-    Write-Output "$filePath test complete successfully. ($totalTime elapsed)"
+    Write-Output "$filePath test complete successfully. ($($stopwatch.elapsed))"
 }
 
 #####################################################################
-function CompressPathToFile {
+function CompressPathToBlob {
 
     [CmdletBinding()]
     param (
@@ -236,25 +238,35 @@ function CompressPathToFile {
     }
 
     # zip the source
+    $params = @('u')
+    $params += "-mx=$($CompressionLevel)"
+    $params += $archivePath
+    $params += $sourcePath
+    
     $startTime = Get-Date
-    $params = @('u', $archivePath, $sourcePath)
     Write-Debug "Archiving $sourcePath to $archivePath..."
     & $zipExe $params
     if (-not $?) {
-        Write-Error "Error creating archive, executing: $zipExe $($params -join ' ')"
+        Write-Error "Error creating archive: $archivePath from: $sourcePath"
         throw
     }
     $elapsedTime = $(Get-Date) - $startTime
     $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
     Write-Output "$archivePath created. ($totalTime elapsed)"
 
-    # check archive
-    if ($ArchiveCheck -eq 'Simple') {
-        ArchiveCheckSimple -filePath $archivePath
+    # check compressed file
+    if ($script:IntegrityCheck -eq 'None') {
+        # skip the integrity check
     }
-    elseif ($ArchiveCheck -eq 'Full') {
-        ArchiveCheckFull -filePath $archivePath -sourcePath $sourcePath
+    elseif ($script:IntegrityCheck -eq 'Simple') {
+        IntegrityCheckSimple -filePath $archivePath
     }
+    elseif ($script:IntegrityCheck -eq 'Full') {
+        IntegrityCheckFull -filePath $archivePath -sourcePath $sourcePath
+    } else {
+        Write-Error "-IntegrityCheck $IntegrityCheck invaild. No integrity check performed." 
+    }
+
 }
 
 #####################################################################
@@ -280,8 +292,46 @@ function CopyFileToContainer {
     $params = @('copy', $filePath, $destinationURI)
     & $azCopyExe $params
     if (-not $?) {
-        Write-Error "Error uploading file, executing: $azcopyExe $($params -join ' ')"
+        Write-Error "Error uploading file: $filePath to $containerURI"
         throw
+    }
+
+}
+
+
+#####################################################################
+Function Test-IsFileLocked {
+
+    # copied from https://mcpmag.com/articles/2018/07/10/check-for-locked-file-using-powershell.aspx
+
+    [cmdletbinding()]
+    Param (
+        [parameter(Mandatory=$True,ValueFromPipeline=$True,ValueFromPipelineByPropertyName=$True)]
+        [Alias('FullName','PSPath')]
+        [string[]] $Path
+    )
+    Process {
+        ForEach ($Item in $Path) {
+            #Ensure this is a full path
+            $Item = Convert-Path $Item
+            #Verify that this is a file and not a directory
+            If ([System.IO.File]::Exists($Item)) {
+                Try {
+                    $FileStream = [System.IO.File]::Open($Item,'Open','Write')
+                    $FileStream.Close()
+                    $FileStream.Dispose()
+                    $IsLocked = $False
+                } Catch [System.UnauthorizedAccessException] {
+                    $IsLocked = 'AccessDenied'
+                } Catch {
+                    $IsLocked = $True
+                }
+                [pscustomobject] @{
+                    FullName = $Item
+                    IsLocked = $IsLocked
+                }
+            }
+        }
     }
 }
 
@@ -344,7 +394,7 @@ if ($UseManagedIdentity) {
     }
 }
 
-if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') {
+if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
     # login to powershell az commands
     try {
         $result = Get-AzContext -ErrorAction Stop
@@ -388,11 +438,11 @@ elseif ($CleanUpDir -eq 'Delete' -or $CleanUpDir -eq 'RecycleBin') {
 }
 
 # check -ArchiveTempFilePath
-if ($ArchiveTempDir -and -not $ArchiveTempDir.EndsWith('\')) {
-    $ArchiveTempDir += '\'
+if ($CompressTempDir -and -not $CompressTempDir.EndsWith('\')) {
+    $CompressTempDir += '\'
 }
-if (-not $(Test-Path -Path $ArchiveTempDir)) {
-    throw "Unable to find $ArchiveTempDir. Please check the -ArchiveTempDir and try again."
+if (-not $(Test-Path -Path $CompressTempDir)) {
+    throw "Unable to find $CompressTempDir. Please check the -CompressTempDir and try again."
 } 
 
 # check source filepath
@@ -401,8 +451,8 @@ if (-not $(Test-Path -Path $SourceFilePath)) {
 } 
 
 # invalid combination -SeparateEachDirectory will force the use of directory name
-if ($ArchiveFileName -and $SeparateEachDirectory) {
-    throw "-ArchiveFilename and -SeparateEachDirectory can not be used together."
+if ($BlobName -and $SeparateEachDirectory) {
+    throw "-BlobName and -SeparateEachDirectory can not be used together."
 }
 
 if ($SeparateEachDirectory) {
@@ -413,12 +463,33 @@ if ($SeparateEachDirectory) {
     $sourcePaths = $SourceFilePath
 }
 
+$archiveCount = 0
 foreach ($sourcePath in $sourcePaths) {
-    $archivePath = $ArchiveTempDir + $(Split-Path $sourcePath -Leaf) + '.7z'
 
-    if ($AppendDateToFileName) {
+    if ($BlobName) {
+        # only one large blob being created
+        $archivePath = $CompressTempDir + $BlobName
+    } else {
+        $archivePath = $CompressTempDir + $(Split-Path $sourcePath -Leaf) + '.7z'
+    }
+ 
+    # check to see if another archive is in progress
+    $existingFiles = Get-Item "$($(Split-Path -Path $archivePath -Parent) + '\' + $(Split-Path -Path $archivePath -LeafBase) + '*')"
+    if ($existingFiles) {
+        $lockedFiles = Test-IsFileLocked -Path $existingFiles.FullName | Where-Object {$_.IsLocked}
+        if ($lockedFiles) {
+            Write-Output "$sourcePath skipped. Existing $($lockedFiles.FullName) is locked."
+            continue
+        } else {
+            Write-Output "Cleaning up leftover files $($existingFiles.FullName)"
+            $existingFiles | Remove-Item
+       }
+    }
+
+    # add date/datetime to filename
+    if ($AppendToBlobName) {
         $path = [System.IO.FileInfo] $archivePath
-        if ($AppendDateToFileName -eq 'Time') {
+        if ($AppendToBlobName -eq 'Time') {
             $dateStr = "{0:yyyyMMddHHmmss}" -f $(Get-Date)
         } else {
             $dateStr = "{0:yyyyMMdd}" -f $(Get-Date)
@@ -426,7 +497,7 @@ foreach ($sourcePath in $sourcePaths) {
         $archivePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $dateStr + $path.Extension
     }
 
-    CompressPathToFile -SourcePath $sourcePath -archivePath $archivePath
+    CompressPathToBlob -SourcePath $sourcePath -archivePath $archivePath
     CopyFileToContainer -filePath $archivePath -ContainerURI $ContainerURI
 
     if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
@@ -434,17 +505,16 @@ foreach ($sourcePath in $sourcePaths) {
         $archiveFile = Get-ChildItem $archivePath
         $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $archiveFile.Name
         if ($archiveFile.Length -ne $blob.Length) {
-            throw "$($archiveFile.Name) size ($($archiveFile.Length)) does not match $($blob.Name) Blob size ($($blob.Length))"
-            return $false
+            Write-Error "$($archiveFile.Name) size ($($archiveFile.Length)) does not match $($blob.Name) Blob size ($($blob.Length))"
+            throw
         }
 
         if ($BlobTier) {
             $blob.ICloudBlob.SetStandardBlobTier($BlobTier)
             Write-Output "$containerURI/$($blob.Name) tier set to $BlobTier"
         }
-    
     }
-
+ 
     # clean up zip file
     Remove-Item -Path $archivePath -Force
 
@@ -454,7 +524,7 @@ foreach ($sourcePath in $sourcePaths) {
         Write-Output "$sourcePath deleted"
     }
     elseif ($CleanUpDir -eq 'RecycleBin') {
-        $shell = new-object -comobject "Shell.Application"
+        $shell = New-Object -comobject "Shell.Application"
         $item = $shell.Namespace(0).ParseName($SourcePath)
         $item.InvokeVerb("delete")
         Write-Output "$sourcePath removed to Recycle Bin"
@@ -467,6 +537,9 @@ foreach ($sourcePath in $sourcePaths) {
     Write-Output ''
     Write-Output "==================== $(Split-Path $archivePath -Leaf) complete. $(Get-Date) ===================="
     Write-Output ''
+    
+    $archiveCount++
 }
 
+Write-Output "$archiveCount archives copied."
 Write-Output "Script Complete. $(Get-Date)"
