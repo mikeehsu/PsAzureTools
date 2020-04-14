@@ -239,22 +239,22 @@ function CompressPathToBlob {
         }
     }
 
+    # start a timer
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
     # zip the source
     $params = @('u')
     $params += "-mx=$($CompressionLevel)"
     $params += $archivePath
     $params += $sourcePath
     
-    $startTime = Get-Date
-    Write-Debug "Archiving $sourcePath to $archivePath..."
+    Write-Verbose "Archiving $sourcePath to $archivePath..."
     & $zipExe $params
     if (-not $?) {
         Write-Error "Error creating archive: $archivePath from: $sourcePath"
         throw
     }
-    $elapsedTime = $(Get-Date) - $startTime
-    $totalTime = "{0:HH:mm:ss}" -f ([datetime] $elapsedTime.Ticks)
-    Write-Output "$archivePath created. ($totalTime elapsed)"
+    Write-Output "$archivePath created. ($($stopwatch.Elapsed))"
 
     # check compressed file
     if ($script:IntegrityCheck -eq 'None') {
@@ -283,13 +283,16 @@ function CopyFileToContainer {
         [string] $containerURI
     )
     
+    # start a timer
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
     # upload file
     $uri = [uri] $ContainerURI
     $path = [System.IO.FileInfo] $filePath
     $destinationURI = 'https://' + $uri.Host + "$($uri.LocalPath)/$($path.Name)" + $uri.Query 
     
-    Write-Output "Upload $($path.Name) started to $destinationURI ..."
+    Write-Verbose "Copy $($path.Name) to $destinationURI started."
+
     # using & command syntax since Invoke-Expression doesn't throw an error
     $params = @('copy', $filePath, $destinationURI)
     & $azCopyExe $params
@@ -298,6 +301,7 @@ function CopyFileToContainer {
         throw
     }
 
+    Write-Output "$destinationURI copy complete. ($($stopwatch.Elapsed))"
 }
 
 #####################################################################
@@ -311,6 +315,7 @@ Function Test-IsFileLocked {
         [Alias('FullName','PSPath')]
         [string[]] $Path
     )
+
     Process {
         ForEach ($Item in $Path) {
             #Ensure this is a full path
@@ -355,12 +360,6 @@ Function CleanUpSource {
     if ($CleanUpDir -eq 'Delete') {
         Remove-Item -Path $sourcePath -Recurse -Force
         Write-Output "$sourcePath deleted ($($stopwatch.Elapsed))"
-    }
-    elseif ($CleanUpDir -eq 'RecycleBin') {
-        $shell = New-Object -comobject "Shell.Application"
-        $item = $shell.Namespace(0).ParseName($SourcePath)
-        $item.InvokeVerb("delete")
-        Write-Output "$sourcePath removed to Recycle Bin ($($stopwatch.Elapsed))"
 
     } elseif ($CleanUpDir) {
         Move-Item -Path $sourcePath -Destination $CleanUpDir
