@@ -59,9 +59,9 @@ param (
     [Parameter(ParameterSetName = "ArchiveURI", Mandatory = $true)]
     [string] $ArchiveURI,
 
-    [Parameter(Mandatory = $true)]
-    [string] $DestinationPath,
-        
+    [Parameter(Mandatory = $false)]
+    [string] $DestinationPath = '.\',
+
     [Parameter(Mandatory = $false)]
     [switch] $WaitForRehydration,
 
@@ -70,6 +70,9 @@ param (
 
     [Parameter(Mandatory = $false)]
     [switch] $RestoreEmptyDirectories,
+
+    [Parameter(Mandatory = $false)]
+    [string] $LogOutputDir,
 
     [Parameter(Mandatory = $false)]
     [string] $ArchiveTempDir = $env:TEMP,
@@ -100,11 +103,13 @@ function LogOutput
         [string] $blobName
     )
 
-    $logFile = $script:DestinationPath + $blobName + '.log'
+    $logFile = $blobName + '.log'
 
     $output = "$(Get-Date) $message"
 
-    $output | Out-File -Path $logFile -Append
+    if ($script:LogOutputDir) {
+        $output | Out-File -Path "$($script:LogOutputDir)$($logFile)" -Append        
+    }
     Write-Output $output
 }
 
@@ -118,25 +123,31 @@ function RestoreBlobFromURI {
     $uri = [uri] $archiveURI
     $fileName = $uri.Segments[$uri.Segments.Count - 1]
 
+    LogOutput -BlobName $fileName -Message "----- Restore of $filename to $script:DestinationPath started -----"
+
     $params = @('copy', $archiveURI, $script:ArchiveTempDir)
-    LogOutput -BlobName $fileName -Message "$script:azcopyExe $($params -join ' ') started."
+    LogOutput -BlobName $fileName -Message "$script:azcopyExe $($params -join ' ') started." 
     & $script:azcopyExe $params
     if (-not $?) {
-        throw "Error copying  - $archiveURI to $script:ArchiveTempDir" 
+        LogOutput -BlobName $fileName -Message "ERROR - error occurred while downloading $archiveURI"
+        Write-Error "ERROR: erorr occurred while downloading blob"
+        throw 
     }
 
     $params = @('x', $($script:ArchiveTempDir + $fileName), "-o$script:DestinationPath", '-aoa')
     LogOutput -BlobName $fileName -Message "$script:zipExe $($params -join ' ') started. "
     & $script:zipExe $params
     if (-not $?) {
-        throw "Error restoring archive - $($script:ArchiveTempDir + $fileName) to -o$script:DestinationPath" 
+        LogOutput -BlobName $fileName -Message "ERROR: unable to uncompress $($params[1])"
+        Write-Error "ERROR: unable to uncompress file"
+        throw
     }
 
     if (-not $KeepArchiveFile) {
         Remove-Item "$($script:ArchiveTempDir + $fileName)" -Force
     }
 
-    LogOutput -BlobName $fileName -Message "==================== Restore of $filename to $script:DestinationPath complete ===================="
+    LogOutput -BlobName $fileName -Message "----- Restore of $filename to $script:DestinationPath complete -----"
 }
 
 #####################################################################
@@ -184,6 +195,15 @@ if ($AzCopyCommandDir -and -not $AzCopyCommandDir.EndsWith('\')) {
 }
 $azcopyExe = $AzCopyCommandDir + 'azcopy.exe'
 
+# check LogOutputDir
+if ($LogOutputDir -and -not $AzCopyCommandDir.EndsWith('\')) {
+    $LogOutputDir += '\'
+    if (-not $(Test-Path -Path $LogOutputDir)) {
+        throw "Unable to find -LogOutputDir $LogOutputDir for writing logs"
+    }
+}
+
+
 try {
     $null = Invoke-Expression -Command $azcopyExe -ErrorAction SilentlyContinue
 }
@@ -195,8 +215,8 @@ if ($RestoreEmptyDirectories -and $ArchiveFilePath) {
     throw  "Incompatible parameters -RestoreEmptyDirectories can not be used with -ArchiveFilePath"
 }
 
-if (-not ($RestoreEmptyDirectories -or $ArchiveFilePath)) {
-    throw  "-ArchiveFilePath or -RestoreEmptyDirectories must be provided"
+if (-not ($RestoreEmptyDirectories -or $ArchiveFilePath -or $ArchiveURI))  {
+    throw  "-ArchiveURI, -ArchiveFilePath or -RestoreEmptyDirectories must be provided"
 }
 
 if ($ArchiveTempDir -and -not $ArchiveTempDir.EndsWith('\')) {
@@ -248,7 +268,7 @@ if ($UseManagedIdentity) {
 }
 
 if ($ArchiveURI) {
-    RestoreFile -archiveURI $ArchiveURI
+    RestoreBlobFromURI -archiveURI $ArchiveURI
     return
 }
 
@@ -334,11 +354,11 @@ foreach ($archiveBlobName in $archiveBlobNames) {
     # create new job
     $params = @{
         Name         = $archiveBlobName
-        ScriptBlock  = { Param ($p1, $p2, $p3, $p4, $p5, $p6, $p7) .\Restore-ArchiveBlob.ps1 -StorageAccountName $p1 -ContainerName $p2 -ArchiveFilePath $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 -ArchiveTempDir $p7 }
+        ScriptBlock  = { Param ($p1, $p2, $p3, $p4, $p5, $p6, $p7) .\RestoreBlobArchive.ps1 -StorageAccountName $p1 -ContainerName $p2 -ArchiveFilePath $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 -ArchiveTempDir $p7 }
         ArgumentList = $StorageAccountName, $ContainerName, $archiveBlobName, $($DestinationPath + $(Split-Path $archiveBlobName -LeafBase) + '\'), $AzCopyCommandDir, $ZipCommandDir, $ArchiveTempDir
     }
     $jobs += Start-Job @params
-    LogOutput -BlobName $archiveBlobName -Message "$archiveBlobName job started"
+    LogOutput -BlobName $archiveBlobName -Message "==================== $archiveBlobName job started ===================="
 }
 
 $waitInterval = 5
