@@ -392,7 +392,7 @@ do {
         else {
             $sleepInterval = 5
             $job | Receive-Job | ForEach-Object {
-                LogOutput -BlobName $job.name -Message "$($job.Name)> $_"
+                LogOutput -BlobName $job.name -Message "$_"
             }
             LogOutput -BlobName $job.name "$($job.ChildJobs[0].Error)"
             LogOutput -BlobName $job.name "==================== $($job.Name) $($job.State) $($job.StatusMessage) ===================="
