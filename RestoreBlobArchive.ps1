@@ -97,20 +97,18 @@ function LogOutput
     [CmdletBinding()]
     param (
         [Parameter(Position=0)]
-        [string] $message,
+        [string] $blobName,
 
         [Parameter(Position=1)]
-        [string] $blobName
+        [string] $message
     )
 
     $logFile = $blobName + '.log'
 
-    $output = "$(Get-Date) $message"
-
     if ($script:LogOutputDir) {
-        $output | Out-File -Path "$($script:LogOutputDir)$($logFile)" -Append        
+        "$(Get-Date) $message" | Out-File -Path "$($script:LogOutputDir)$($logFile)" -Append        
     }
-    Write-Output $output
+    Write-Output "$(Get-Date) $($blobName): $message"
 }
 
 #####################################################################
@@ -277,11 +275,11 @@ if ($ArchiveURI) {
 try {
     $result = Get-AzContext -ErrorAction Stop
     if (-not $result.Environment) {
-        throw "Use of -StorageAccount parameter set requires logging in your current sessions first. Please use Connect-AzAccount to login and Select-AzSubscriptoin to set the proper subscription context before proceeding."
+        throw "Use of -StorageAccountName parameter set requires logging in your current sessions first. Please use Connect-AzAccount to login and Select-AzSubscriptoin to set the proper subscription context before proceeding."
     }
 }
 catch {
-    throw "Use of -StorageAccount parameter set requires logging in your current sessions first. Please use Connect-AzAccount to login and Select-AzSubscriptoin to set the proper subscription context before proceeding."
+    throw "Use of -StorageAccountName parameter set requires logging in your current sessions first. Please use Connect-AzAccount to login and Select-AzSubscriptoin to set the proper subscription context before proceeding."
 }
 
 $resource = Get-AzResource -ResourceType 'Microsoft.Storage/storageAccounts' -Name $StorageAccountName
@@ -298,6 +296,11 @@ $container = Get-AzStorageContainer -Name $ContainerName -Context $storageAccoun
 if (-not $container) {
     throw "Error getting container info for $ContainerName - "
 }
+
+
+##### START PROCESSING #####
+
+$scriptPath = $MyInvocation.InvocationName
 
 # restore a single archive file
 if ($ArchiveFilePath) {
@@ -352,42 +355,47 @@ foreach ($archiveBlobName in $archiveBlobNames) {
     }
 
     # create new job
+    $scriptBlock = [ScriptBlock]::Create('Param ($p1, $p2, $p3, $p4, $p5, $p6, $p7) ' + $scriptPath + ' -StorageAccountName $p1 -ContainerName $p2 -ArchiveFilePath $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 -ArchiveTempDir $p7')
     $params = @{
         Name         = $archiveBlobName
-        ScriptBlock  = { Param ($p1, $p2, $p3, $p4, $p5, $p6, $p7) .\RestoreBlobArchive.ps1 -StorageAccountName $p1 -ContainerName $p2 -ArchiveFilePath $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 -ArchiveTempDir $p7 }
+        ScriptBlock  = $scriptBlock
         ArgumentList = $StorageAccountName, $ContainerName, $archiveBlobName, $($DestinationPath + $(Split-Path $archiveBlobName -LeafBase) + '\'), $AzCopyCommandDir, $ZipCommandDir, $ArchiveTempDir
     }
+    # ScriptBlock  = { Param ($p1, $p2, $p3, $p4, $p5, $p6, $p7) .\Restore-BlobArchive.ps1 -StorageAccountName $p1 -ContainerName $p2 -ArchiveFilePath $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 -ArchiveTempDir $p7 }
     $jobs += Start-Job @params
     LogOutput -BlobName $archiveBlobName -Message "==================== $archiveBlobName job started ===================="
 }
 
-$waitInterval = 5
+$sleepInterval = 5
 $jobIds = [System.Collections.ArrayList] @($jobs.Id)
 do {
     Write-Output "$(Get-Date) Waiting for jobs $($jobIds -join ', ')..."
-    Start-Sleep -Seconds $waitInterval
+    Start-Sleep -Seconds $sleepInterval
 
     $CompleteJobIds = @()
     foreach ($jobId in $jobIds) {
         $job = Get-Job -Id $jobId
         if ($job.State -eq 'Running') {
             if ($job.HasMoreData) {
+                $sleepInterval = 5
                 $job | Receive-Job | ForEach-Object {
-                    LogOutput -BlobName $job.name -Message "$($job.Name)> $_"
+                    LogOutput -BlobName $job.name -Message "$_"
                 }
             } else {
-                $waitInterval++
-                if ($waitInterval -gt 60) {
-                    $waitInterval = 60
+                if ($sleepInterval -gt 60) {
+                    $sleepInterval = 60
+                } else {
+                    $sleepInterval += 5
                 }
             }
         }
         else {
+            $sleepInterval = 5
             $job | Receive-Job | ForEach-Object {
                 LogOutput -BlobName $job.name -Message "$($job.Name)> $_"
             }
-            LogOutput -BlobName $job.name "$($job.Name)> $($job.ChildJobs[0].Error)"
-            LogOutput -BlobName $job.name "$($job.Name)> ==================== $($job.Name) $($job.State) $($job.StatusMessage) ===================="
+            LogOutput -BlobName $job.name "$($job.ChildJobs[0].Error)"
+            LogOutput -BlobName $job.name "==================== $($job.Name) $($job.State) $($job.StatusMessage) ===================="
             Remove-Job $job
             $CompleteJobIds += $jobId
         }    
