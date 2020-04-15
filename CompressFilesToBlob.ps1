@@ -294,14 +294,18 @@ function CopyFileToContainer {
     Write-Verbose "Copy $($path.Name) to $destinationURI started."
 
     # using & command syntax since Invoke-Expression doesn't throw an error
-    $params = @('copy', $filePath, $destinationURI)
+    $params = @('copy', $filePath, $destinationURI, "--check-length")
+    if ($script:BlobTier) {
+        $params += ("--block-blob-tier=$script:BlobTier")
+    }
+
     & $azCopyExe $params
     if (-not $?) {
         Write-Error "Error uploading file: $filePath to $containerURI"
         throw
     }
 
-    Write-Output "$destinationURI copy complete. ($($stopwatch.Elapsed))"
+    Write-Output "$($uri.Host)$($uri.LocalPath)/$($path.Name) copy complete. ($($stopwatch.Elapsed))"
 }
 
 #####################################################################
@@ -419,11 +423,11 @@ if ($UseManagedIdentity) {
     $environment = Get-AzEnvironment -Name $context.Environment
 
     # login to azcopy
-    $params = @('login', '--identity', "--aad-endpoint", $environment.ActiveDirectoryAuthority)
-    & $azcopyExe $params
-    if (-not $?) {
-        throw "Unable to login to azcopy using: $azcopyExe - $($params -join ' ')"
-    }
+    # $params = @('login', '--identity', "--aad-endpoint", $environment.ActiveDirectoryAuthority)
+    # & $azcopyExe $params
+    # if (-not $?) {
+    #     throw "Unable to login to azcopy using: $azcopyExe - $($params -join ' ')"
+    # }
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
@@ -453,7 +457,7 @@ if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') {
         throw "Error getting container info for $ContainerName - "
     }
 
-    $ContainerURI = $storageAccount.PrimaryEndpoints.Blob + $ContainerName
+    $ContainerURI = $storageAccount.PrimaryEndpoints.Blob + $ContainerName + $(New-AzStorageAccountSASToken -Context $storageAccount.context -Service Blob -ResourceType Service,Container,Object -Permission racwdlup -ExpiryTime $(Get-Date).AddDays(5))
 }
 
 # check -CleanUpDir parameter
@@ -536,26 +540,30 @@ foreach ($sourcePath in $sourcePaths) {
     CompressPathToBlob -SourcePath $sourcePath -archivePath $archivePath
     CopyFileToContainer -filePath $archivePath -ContainerURI $ContainerURI
 
-    if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
-        # verify the file & blob size created
-        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-        $archiveFile = Get-ChildItem $archivePath
-        $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $archiveFile.Name
-        if ($archiveFile.Length -ne $blob.Length) {
-            Write-Error "$($archiveFile.Name) size ($($archiveFile.Length)) does not match $($blob.Name) Blob size ($($blob.Length))"
-            throw
-        }
-        Write-Output "$($archiveFile.Name) blob copy verified successfully. ($($stopwatch.Elapsed))"
+    # if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
+    #     # verify the file & blob size created
+    #     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    #     $archiveFile = Get-ChildItem $archivePath
+    #     $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $archiveFile.Name
+    #     if ($archiveFile.Length -ne $blob.Length) {
+    #         Write-Error "$($archiveFile.Name) size ($($archiveFile.Length)) does not match $($blob.Name) Blob size ($($blob.Length))"
+    #         throw
+    #     }
+    #     Write-Output "$($archiveFile.Name) blob copy verified successfully. ($($stopwatch.Elapsed))"
 
-        if ($BlobTier) {
-            $blob.ICloudBlob.SetStandardBlobTier($BlobTier)
-            Write-Output "$containerURI/$($blob.Name) tier set to $BlobTier"
-        }
-    }
+    #     if ($BlobTier) {
+    #         $blob.ICloudBlob.SetStandardBlobTier($BlobTier)
+    #         Write-Output "$containerURI/$($blob.Name) tier set to $BlobTier"
+    #     }
+    # }
  
     # clean up zip file
     Remove-Item -Path $archivePath -Force
-    CleanUpSource -sourcePath $sourcePath -cleanUpDir $CleanUpDir
+
+    # clean up source files
+    if ($CleanUpDir) {
+        CleanUpSource -sourcePath $sourcePath -cleanUpDir $CleanUpDir
+    }
 
     Write-Output ''
     Write-Output "==================== $(Split-Path $archivePath -Leaf) complete. $(Get-Date) ===================="
