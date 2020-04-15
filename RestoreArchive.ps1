@@ -72,9 +72,6 @@ param (
     [switch] $RestoreEmptyDirectories,
 
     [Parameter(Mandatory = $false)]
-    [switch] $CreateLogFile,
-
-    [Parameter(Mandatory = $false)]
     [string] $ArchiveTempDir = $env:TEMP,
 
     [Parameter(Mandatory = $false)]
@@ -329,7 +326,7 @@ foreach ($archiveBlobName in $archiveBlobNames) {
     # skip existing jobs
     $job = Get-Job -Name $archiveBlobName -ErrorAction SilentlyContinue
     if ($job -and $job.State -eq 'Running') {
-        LogOutput -BlobName $archiveBlobNames "$archiveBlobName (Job:$($job.Id)) already running, staus will be displayed"
+        LogOutput -BlobName $archiveBlobName "$archiveBlobName (Job:$($job.Id)) already running, staus will be displayed"
         $jobs += $job
         continue 
     }
@@ -337,17 +334,18 @@ foreach ($archiveBlobName in $archiveBlobNames) {
     # create new job
     $params = @{
         Name         = $archiveBlobName
-        ScriptBlock  = { Param ($p1, $p2, $p3, $p4, $p5, $p6) .\RestoreArchive.ps1 -StorageAccountName $p1 -ContainerName $p2 -ArchiveFilePath $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 }
-        ArgumentList = $StorageAccountName, $ContainerName, $archiveBlobName, $DestinationPath, $AzCopyCommandDir, $ZipCommandDir
+        ScriptBlock  = { Param ($p1, $p2, $p3, $p4, $p5, $p6, $p7) .\Restore-ArchiveBlob.ps1 -StorageAccountName $p1 -ContainerName $p2 -ArchiveFilePath $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 -ArchiveTempDir $p7 }
+        ArgumentList = $StorageAccountName, $ContainerName, $archiveBlobName, $($DestinationPath + $(Split-Path $archiveBlobName -LeafBase) + '\'), $AzCopyCommandDir, $ZipCommandDir, $ArchiveTempDir
     }
     $jobs += Start-Job @params
     LogOutput -BlobName $archiveBlobName -Message "$archiveBlobName job started"
 }
 
+$waitInterval = 5
 $jobIds = [System.Collections.ArrayList] @($jobs.Id)
 do {
     Write-Output "$(Get-Date) Waiting for jobs $($jobIds -join ', ')..."
-    Start-Sleep 60
+    Start-Sleep -Seconds $waitInterval
 
     $CompleteJobIds = @()
     foreach ($jobId in $jobIds) {
@@ -356,6 +354,11 @@ do {
             if ($job.HasMoreData) {
                 $job | Receive-Job | ForEach-Object {
                     LogOutput -BlobName $job.name -Message "$($job.Name)> $_"
+                }
+            } else {
+                $waitInterval++
+                if ($waitInterval -gt 60) {
+                    $waitInterval = 60
                 }
             }
         }
