@@ -9,13 +9,13 @@ This script will restore a compressed zip file from blob to a VM file system. If
 Name of the storage account to upload the archive file to. Cannot be used with ContainerURI.
 
 .PARAMETER ContainerName
-Name of the container to upload the archive file to. Cannot be used with ArchiveURI.
+Name of the container to upload the archive file to. Cannot be used with BlobUri.
 
-.PARAMETER ArchiveFilePath
-Name of the container to upload the archive file to. Cannot be used with ArchiveURI.
+.PARAMETER BlobName
+Name of the container to upload the archive file to. Cannot be used with BlobUri.
 
-.PARAMETER ArchiveURI
-URI of the compressed archive file. Using this parameter assumes that you can only access this file via SAS token. When using ArchiveURI, the file will NOT be rehydrated. For files in an achive tier, the storage account naming convention will need to be used. Cannot be used with -StorageAccountName, -ContainerName, -ManagedIdentity, or -Environment
+.PARAMETER BlobUri
+URI of the compressed archive file. Using this parameter assumes that you can only access this file via SAS token. When using BlobUri, the file will NOT be rehydrated. For files in an achive tier, the storage account naming convention will need to be used. Cannot be used with -StorageAccountName, -ContainerName, -ManagedIdentity, or -Environment
 
 .PARAMETER DestinationPath
 Path where the archive should be expanded into. This script will create a folder underneath the -DestinationPath, but it will NOT create it. This directory must exists before the script will start.
@@ -42,7 +42,7 @@ Specifies the use of Managed Identity to authenticate into Azure Powershell APIs
 Specifies the Azure cloud environment to use for authentication. If not specified the AzureCloud is used by default
 
 .EXAMPLE
-RestoreArchive.ps1 -StorageAccountName 'myStorageAccount' -ContainerName 'archive-continer' -ArchiveFilePath 'archive.7z' -DestinationPath c:\restored-archives
+RestoreArchive.ps1 -StorageAccountName 'myStorageAccount' -ContainerName 'archive-continer' -BlobName 'archive.7z' -DestinationPath c:\restored-archives
 #>
 
 [CmdletBinding()]
@@ -54,10 +54,10 @@ param (
     [string] $ContainerName,
 
     [Parameter(ParameterSetName = "StorageAccount", Mandatory = $false)]
-    [string] $ArchiveFilePath,
+    [string] $BlobName,
 
-    [Parameter(ParameterSetName = "ArchiveURI", Mandatory = $true)]
-    [string] $ArchiveURI,
+    [Parameter(ParameterSetName = "BlobUri", Mandatory = $true)]
+    [string] $BlobUri,
 
     [Parameter(Mandatory = $false)]
     [string] $DestinationPath = '.\',
@@ -115,19 +115,19 @@ function LogOutput
 function RestoreBlobFromURI {
     param (
         [parameter(Mandatory = $true)]
-        [string] $archiveURI
+        [string] $BlobUri
     )
 
-    $uri = [uri] $archiveURI
+    $uri = [uri] $BlobUri
     $fileName = $uri.Segments[$uri.Segments.Count - 1]
 
     LogOutput -BlobName $fileName -Message "----- Restore of $filename to $script:DestinationPath started -----"
 
-    $params = @('copy', $archiveURI, $script:ArchiveTempDir)
+    $params = @('copy', $BlobUri, $script:ArchiveTempDir)
     LogOutput -BlobName $fileName -Message "$script:azcopyExe $($params -join ' ') started." 
     & $script:azcopyExe $params
     if (-not $?) {
-        LogOutput -BlobName $fileName -Message "ERROR - error occurred while downloading $archiveURI"
+        LogOutput -BlobName $fileName -Message "ERROR - error occurred while downloading $BlobUri"
         Write-Error "ERROR: erorr occurred while downloading blob"
         throw 
     }
@@ -172,7 +172,7 @@ function RestoreBlob {
     }
 
     $sasToken = New-AzStorageBlobSASToken -CloudBlob $blob.ICloudBlob -Context $blob.Context -Permission r
-    RestoreBlobFromURI -archiveURI $($blob.ICloudBlob.Uri.Absoluteuri + $sasToken)
+    RestoreBlobFromURI -BlobUri $($blob.ICloudBlob.Uri.Absoluteuri + $sasToken)
 }
 
 #####################################################################
@@ -210,12 +210,12 @@ catch {
     throw "Unable to find azcopy.exe command. Please make sure azcopy.exe is in your PATH or use -AzCopyCommandDir to specify azcopy.exe path"
 }
 
-if ($RestoreEmptyDirectories -and $ArchiveFilePath) {
-    throw  "Incompatible parameters -RestoreEmptyDirectories can not be used with -ArchiveFilePath"
+if ($RestoreEmptyDirectories -and $BlobName) {
+    throw  "Incompatible parameters -RestoreEmptyDirectories can not be used with -BlobName"
 }
 
-if (-not ($RestoreEmptyDirectories -or $ArchiveFilePath -or $ArchiveURI))  {
-    throw  "-ArchiveURI, -ArchiveFilePath or -RestoreEmptyDirectories must be provided"
+if (-not ($RestoreEmptyDirectories -or $BlobName -or $BlobUri))  {
+    throw  "-BlobUri, -BlobName or -RestoreEmptyDirectories must be provided"
 }
 
 if ($ArchiveTempDir -and -not $ArchiveTempDir.EndsWith('\')) {
@@ -259,8 +259,8 @@ if ($UseManagedIdentity) {
     $environment = Get-AzEnvironment -Name $context.Environment
 }
 
-if ($ArchiveURI) {
-    RestoreBlobFromURI -archiveURI $ArchiveURI
+if ($BlobUri) {
+    RestoreBlobFromURI -BlobUri $BlobUri
     return
 }
 
@@ -297,8 +297,8 @@ if (-not $container) {
 $scriptPath = $MyInvocation.InvocationName
 
 # restore a single archive file
-if ($ArchiveFilePath) {
-    $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $ArchiveFilePath
+if ($BlobName) {
+    $blob = Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Blob $BlobName
     RestoreBlob -blob $blob
     return
 }
@@ -349,13 +349,13 @@ foreach ($archiveBlobName in $archiveBlobNames) {
     }
 
     # create new job
-    $scriptBlock = [ScriptBlock]::Create('Param ($p1, $p2, $p3, $p4, $p5, $p6, $p7) ' + $scriptPath + ' -StorageAccountName $p1 -ContainerName $p2 -ArchiveFilePath $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 -ArchiveTempDir $p7')
+    $scriptBlock = [ScriptBlock]::Create('Param ($p1, $p2, $p3, $p4, $p5, $p6, $p7) ' + $scriptPath + ' -StorageAccountName $p1 -ContainerName $p2 -BlobName $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 -ArchiveTempDir $p7')
     $params = @{
         Name         = $archiveBlobName
         ScriptBlock  = $scriptBlock
         ArgumentList = $StorageAccountName, $ContainerName, $archiveBlobName, $($DestinationPath + $(Split-Path $archiveBlobName -LeafBase) + '\'), $AzCopyCommandDir, $ZipCommandDir, $ArchiveTempDir
     }
-    # ScriptBlock  = { Param ($p1, $p2, $p3, $p4, $p5, $p6, $p7) .\Restore-BlobArchive.ps1 -StorageAccountName $p1 -ContainerName $p2 -ArchiveFilePath $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 -ArchiveTempDir $p7 }
+    # ScriptBlock  = { Param ($p1, $p2, $p3, $p4, $p5, $p6, $p7) .\Restore-BlobArchive.ps1 -StorageAccountName $p1 -ContainerName $p2 -BlobName $p3 -DestinationPath $p4 -AzCopyCommandDir $p5 -ZipCommandDir $p6 -ArchiveTempDir $p7 }
     $jobs += Start-Job @params
     LogOutput -BlobName $archiveBlobName -Message "==================== $archiveBlobName job started ===================="
 }
