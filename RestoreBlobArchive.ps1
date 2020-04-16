@@ -162,7 +162,7 @@ function RestoreBlob {
         $blobName = $blob.Name
         $containerName = $blob.ICloudBlob.container.Name
 
-        LogOutput "$blobName - waiting for rehydration (update in 10 mins)... "
+        LogOutput -Blobname $blobName -Message "current tier:$($blob.ICloudBlob.Properties.StandardBlobTier)...rehydration status:$($blob.ICloudBlob.Properties.RehydrationStatus) (next update in 10 mins)... "
         Start-Sleep 600 # 10 mins
         $blob = Get-AzStorageBlob -Context $blob.Context -Container $containerName -Blob $blobName
         if (-not $blob) {
@@ -171,7 +171,8 @@ function RestoreBlob {
         }
     }
 
-    RestoreBlobFromURI -archiveURI $blob.ICloudBlob.Uri.Absoluteuri
+    $sasToken = New-AzStorageBlobSASToken -CloudBlob $blob.ICloudBlob -Context $blob.Context -Permission r
+    RestoreBlobFromURI -archiveURI $($blob.ICloudBlob.Uri.Absoluteuri + $sasToken)
 }
 
 #####################################################################
@@ -256,13 +257,6 @@ if ($UseManagedIdentity) {
         throw "Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
     }    
     $environment = Get-AzEnvironment -Name $context.Environment
-
-    # login to azcopy
-    $params = @('login', '--identity', "--aad-endpoint", $environment.ActiveDirectoryAuthority)
-    & $azcopyExe $params
-    if (-not $?) {
-        throw "Unable to login to azcopy using: $azcopyExe - $($params -join ' ')"
-    }
 }
 
 if ($ArchiveURI) {
