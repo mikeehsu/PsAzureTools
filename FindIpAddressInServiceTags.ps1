@@ -33,53 +33,48 @@ Param (
     [Parameter(Mandatory = $false)]
     [string] $Environment
 )
-
+#####################################################################
 Function Get-IPv4NetworkInfo {
     <#
-.SYNOPSIS
-Gets extended information about an IPv4 network.
+    .SYNOPSIS
+    Gets extended information about an IPv4 network.
 
-.DESCRIPTION
-Gets Network Address, Broadcast Address, Wildcard Mask.
-and usable host range for a network given the
-IP address and Subnet Mask.
+    .DESCRIPTION
+    Gets Network Address, Broadcast Address, Wildcard Mask. and usable host range for a network given the IP address and Subnet Mask.
 
-.PARAMETER IPAddress
-IP Address of any ip within the network
-Note: Exclusive from @CIDRAddress
+    .PARAMETER IPAddress
+    IP Address of any ip within the network Note: Exclusive from @CIDRAddress
 
-.PARAMETER SubnetMask
-Subnet Mask of the network.
-Note: Exclusive from @CIDRAddress
+    .PARAMETER SubnetMask
+    Subnet Mask of the network. Note: Exclusive from @CIDRAddress
 
-.PARAMETER CIDRAddress
-CIDR Notation of IP/Subnet Mask (x.x.x.x/y)
-Note: Exclusive from @IPAddress and @SubnetMask
+    .PARAMETER CIDRAddress
+    CIDR Notation of IP/Subnet Mask (x.x.x.x/y) Note: Exclusive from @IPAddress and @SubnetMask
 
-.PARAMETER IncludeIPRange
-Switch parameter that defines whether or not the script will return an array
-of usable host IP addresses within the defined network.
-Note: This parameter can cause delays in script completion for larger subnets.
+    .PARAMETER IncludeIPRange
+    Switch parameter that defines whether or not the script will return an array of usable host IP addresses within the defined network.
+    Note: This parameter can cause delays in script completion for larger subnets.
 
-.EXAMPLE
-Get-IPv4NetworkInfo -IPAddress 192.168.1.23 -SubnetMask 255.255.255.0
+    .EXAMPLE
+    Get-IPv4NetworkInfo -IPAddress 192.168.1.23 -SubnetMask 255.255.255.0
 
-Get network information with IP Address and Subnet Mask
+    Get network information with IP Address and Subnet Mask
 
-.EXAMPLE
-Get-IPv4NetworkInfo -CIDRAddress 192.168.1.23/24
+    .EXAMPLE
+    Get-IPv4NetworkInfo -CIDRAddress 192.168.1.23/24
 
-Get network information with CIDR Notation
+    Get network information with CIDR Notation
 
-.NOTES
-File Name  : Get-IPv4NetworkInfo.ps1
-Author     : Ryan Drane
-Date       : 5/10/16
-Requires   : PowerShell v3
-.LINK
-https://www.ryandrane.com
-https://www.ryandrane.com/2016/05/getting-ip-network-information-powershell/
-#>
+    .NOTES
+    File Name  : Get-IPv4NetworkInfo.ps1
+    Author     : Ryan Drane
+    Date       : 5/10/16
+    Requires   : PowerShell v3
+
+    .LINK
+    https://www.ryandrane.com
+    https://www.ryandrane.com/2016/05/getting-ip-network-information-powershell/
+    #>
 
     Param
     (
@@ -168,29 +163,32 @@ https://www.ryandrane.com/2016/05/getting-ip-network-information-powershell/
     # $IPAddressInt        = [System.BitConverter]::ToUInt32($IPAddressBytes,0)
 
     #Calculate the number of hosts in our subnet, subtracting one to account for network address.
-    $NumberOfHosts = ($BroadcastAddressInt - $NetworkAddressInt) - 1
+    $NumberOfHosts = ($BroadcastAddressInt - $NetworkAddressInt) - 1        
 
     #Calculate the max and min usable host IPs.
     if ($NumberOfHosts -gt 1) {
         $HostMinIP = [ipaddress]([convert]::ToDouble($NetworkAddressInt + 1)) | Select-Object -ExpandProperty IPAddressToString
         $HostMaxIP = [ipaddress]([convert]::ToDouble($NetworkAddressInt + $NumberOfHosts)) | Select-Object -ExpandProperty IPAddressToString
+
+        # Declare an empty array to hold our range of usable IPs.
+        $IPRange = @()
+
+        # If -IncludeIPRange specified, calculate it
+        if ($IncludeIPRange) {
+            # Now run through our IP range and figure out the IP address for each.
+            For ($j = 1; $j -le $NumberOfHosts; $j++) {
+                # Increment Network Address by our counter variable, then convert back
+                # lto an IP address and extract as string, add to IPRange output array.
+                $IPRange += [ipaddress]([convert]::ToDouble($NetworkAddressInt + $j)) | Select-Object -ExpandProperty IPAddressToString
+            }
+        }
     }
     else {
+        # brokend out to accommodate /32 blocks
+        $NumberOfHosts = 1
         $HostMinIP = $IPAddress
         $HostMaxIP = $IPAddress
-    }
-
-    # Declare an empty array to hold our range of usable IPs.
-    $IPRange = @()
-
-    # If -IncludeIPRange specified, calculate it
-    if ($IncludeIPRange) {
-        # Now run through our IP range and figure out the IP address for each.
-        For ($j = 1; $j -le $NumberOfHosts; $j++) {
-            # Increment Network Address by our counter variable, then convert back
-            # lto an IP address and extract as string, add to IPRange output array.
-            $IPRange += [ipaddress]([convert]::ToDouble($NetworkAddressInt + $j)) | Select-Object -ExpandProperty IPAddressToString
-        }
+        $IpRange = @($IPAddress)
     }
 
     # Create our output object

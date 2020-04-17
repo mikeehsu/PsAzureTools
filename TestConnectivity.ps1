@@ -239,6 +239,7 @@ Function Get-IPv4NetworkInfo {
     }
     else {
         # brokend out to accommodate /32 blocks
+        $NumberOfHosts = 1
         $HostMinIP = $IPAddress
         $HostMaxIP = $IPAddress
         $IpRange = @($IPAddress)
