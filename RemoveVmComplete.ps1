@@ -1,35 +1,28 @@
 [CmdletBinding()]
 
 Param(
-    [parameter(Mandatory = $True, Position = 0, ValueFromPipeline = $True, ValueFromPipelineByPropertyName = $True)]
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
     [string] $VmName,
 
-    [parameter(Mandatory = $False)]
+    [Parameter(Mandatory)]
     [string] $ResourceGroupName,
 
-    [parameter(Mandatory = $False)]
-    [bool] $KeepNetworkInterface,
+    [switch] $KeepNetworkInterface,
 
-    [parameter(Mandatory = $False)]
-    [bool] $KeepNetworkSecurityGroup,
+    [switch] $KeepNetworkSecurityGroup,
 
-    [parameter(Mandatory = $False)]
-    [bool] $KeepPublicIp,
+    [switch] $KeepPublicIp,
 
-    [parameter(Mandatory = $False)]
-    [bool] $KeepOsDisk,
+    [switch] $KeepOsDisk,
 
-    [parameter(Mandatory = $False)]
-    [bool] $KeepDataDisk,
+    [switch] $KeepDataDisk,
 
-    [parameter(Mandatory = $False)]
-    [bool] $KeepDiagnostics,
+    [switch] $KeepDiagnostics,
 
-    [parameter(Mandatory = $False)]
-    [bool] $KeepResourceGroup,
+    [switch] $KeepResourceGroup,
 
-    [parameter(Mandatory = $False)]
-    [bool] $Force
+    [switch] $Force
 )
 
 ##########################################################################
@@ -46,12 +39,12 @@ function RemoveNetworkSecurityGroupById {
     $resourceGroupName = $parts[4]
     $networkSecurityGroupName = $parts[8]
 
-    $nsg = Get-AzureRmNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Name $networkSecurityGroupName
+    $nsg = Get-AzNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Name $networkSecurityGroupName
     if ($nsg.NetworkInterfaces -or $nsg.Subnets) {
         Write-Verbose "NetworkSecurityGroup $($resourceGroupName) / $($networkSecurityGroupName) is still being used"
     } else {
         Write-Verbose "Removing NetworkSecurityGroup $($resoruceGroupName) / $($networkSecurityGroupName)"
-        $null = Remove-AzureRmNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Name $networkSecurityGroupName -Force
+        $null = Remove-AzNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Name $networkSecurityGroupName -Force
     }
 
     return
@@ -73,15 +66,15 @@ function RemoveStorageBlobByUri {
     $container = $uriParts[3]
     $blobName = $uriParts[4..$($uriParts.Count-1)] -Join '/'
 
-    $resourceGroupName = $(Get-AzureRmStorageAccount | Where-Object {$_.StorageAccountName -eq "$storageAccountName"}).ResourceGroupName
+    $resourceGroupName = $(Get-AzStorageAccount | Where-Object {$_.StorageAccountName -eq "$storageAccountName"}).ResourceGroupName
     if (-not $resourceGroupName) {
         Write-Error "Error getting ResourceGroupName for $Uri"
         return
     }
 
     Write-Verbose "Removing blob: $blobName from resourceGroup: $resourceGroupName, storageAccount: $storageAccountName, container: $container"
-    Set-AzureRmCurrentStorageAccount -ResourceGroupName "$resourceGroupName" -StorageAccountName "$storageAccountName"
-    Remove-AzureStorageBlob -Container $container -Blob $blobName
+    Set-AzCurrentStorageAccount -ResourceGroupName "$resourceGroupName" -StorageAccountName "$storageAccountName"
+    Remove-AzStorageBlob -Container $container -Blob $blobName
 }
 
 ##########################################################################
@@ -89,10 +82,10 @@ Write-Verbose "Getting VM info for $VmName"
 
 # get vm information
 if ($ResourceGroupName) {
-    $vm = Get-AzureRmVM -ResourceGroupName $ResourceGroupName -Name $VmName -ErrorAction 'Stop'
+    $vm = Get-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName -ErrorAction 'Stop'
 }
 else {
-    $vm = Get-AzureRmVM | Where-Object {$_.Name -eq $VmName}
+    $vm = Get-AzVM | Where-Object {$_.Name -eq $VmName}
 
     # no Vm's found
     if (-not $vm) {
@@ -126,7 +119,7 @@ if (-not $Force) {
 
 try {
     Write-Verbose "Removing VirtualMachine $($ResourceGroupName) / $($VmName)"
-    $result = Remove-AzureRmVM -ResourceGroupName $ResourceGroupName -Name $VmName -Force -ErrorAction 'Stop'
+    $result = Remove-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName -Force -ErrorAction 'Stop'
 
     # remove all Nics, if necessary
     if (-not $KeepNetworkInterface) {
@@ -134,22 +127,22 @@ try {
 
         foreach ($nicId in $nicIds) {
             Write-Verbose "Get NICs info for $nicId"
-            $nicResource = Get-AzureRmResource -ResourceId $nicId -ErrorAction 'Stop'
-            $nic = Get-AzureRmNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.Name)
+            $nicResource = Get-AzResource -ResourceId $nicId -ErrorAction 'Stop'
+            $nic = Get-AzNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.Name)
 
             Write-Verbose "Removing NetworkInterface $($nicResource.ResourceGroupName) / $($nicResource.Name)"
-            $result = Remove-AzureRmNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.Name) -Force
+            $result = Remove-AzNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.Name) -Force
 
             # remove any Public IPs (attached to Nic), if necessary
             if (-not $KeepPublicIp) {
                 if ($nic.IpConfigurations.publicIpAddress) {
                     Write-Verbose "Getting public IP $($nic.IpConfigurations.publicIpAddress.Id)"
                     $pipId = $nic.IpConfigurations.publicIpAddress.Id
-                    $pipResource = Get-AzureRmResource -ResourceId $pipId -ErrorAction 'Stop'
+                    $pipResource = Get-AzResource -ResourceId $pipId -ErrorAction 'Stop'
 
                     if ($pipResource) {
                         Write-Verbose "Removing public IP $($nic.IpConfigurations.publicIpAddress.Id)"
-                        $result = $( Get-AzureRmPublicIpAddress -ResourceGroupName $($pipResource.ResourceGroupName) -Name $($pipResource.Name) | Remove-AzureRmPublicIpAddress -Force )
+                        $result = $( Get-AzPublicIpAddress -ResourceGroupName $($pipResource.ResourceGroupName) -Name $($pipResource.Name) | Remove-AzPublicIpAddress -Force )
                     }
                 }
             } else {
@@ -177,7 +170,7 @@ try {
         if ($managedDiskId) {
             $managedDiskName = $managedDiskId.Split('/')[8]
             Write-Verbose "Removing ManagedDisk $($ResourceGroupName) / $($managedDiskName)"
-            $result = Remove-AzureRmDisk -ResourceGroupName $ResourceGroupName -DiskName $managedDiskName -Force
+            $result = Remove-AzDisk -ResourceGroupName $ResourceGroupName -DiskName $managedDiskName -Force
         }
 
         # remove os disk
@@ -198,7 +191,7 @@ try {
             if ($managedDiskId) {
                 $managedDiskName = $managedDiskId.Split('/')[8]
                 Write-Verbose "Removing Managed Disk $($ResourceGroupName) / $($managedDiskName)"
-                $result = Remove-AzureRmDisk -ResourceGroupName $ResourceGroupName -DiskName $managedDiskName -Force
+                $result = Remove-AzDisk -ResourceGroupName $ResourceGroupName -DiskName $managedDiskName -Force
             }
 
             # remove os disk
@@ -219,17 +212,17 @@ try {
             $uriParts = $storageUri.Split('/')
             $storageAccountName = $uriParts[2].Split('.')[0]
 
-            $storageRg = $(Get-AzureRmStorageAccount | Where-Object {$_.StorageAccountName -eq "$storageAccountName"}).ResourceGroupName
+            $storageRg = $(Get-AzStorageAccount | Where-Object {$_.StorageAccountName -eq "$storageAccountName"}).ResourceGroupName
             if (-not $storageRg) {
                 Write-Error "Error getting ResourceGroupName for $storageUri"
                 return
             }
 
-            $null = Set-AzureRmCurrentStorageAccount -ResourceGroupName $storageRg -StorageAccountName $storageAccountName
-            $container = Get-AzureStorageContainer  | Where-Object {$_.Name -like "bootdiagnostics-*-$($vm.VmId)" }
+            $null = Set-AzCurrentStorageAccount -ResourceGroupName $storageRg -StorageAccountName $storageAccountName
+            $container = Get-AzStorageContainer  | Where-Object {$_.Name -like "bootdiagnostics-*-$($vm.VmId)" }
             if ($container) {
                 Write-Verbose "Removing container: $($container.name) from resourceGroup: $storageRg, storageAccount: $storageAccountName"
-                Remove-AzureStorageContainer -Name $($container.name) -Force
+                Remove-AzStorageContainer -Name $($container.name) -Force
             }
         }
     } else {
@@ -239,10 +232,10 @@ try {
     # remove ResourceGroup, if nothing else inside
     if (-not $KeepResourceGroup) {
         Write-Verbose "Checking ResourceGroup $ResourceGroupName"
-        $resources = Get-AzureRmResource | Where-Object {$_.ResourceGroupName -eq "$ResourceGroupName" }
+        $resources = Get-AzResource | Where-Object {$_.ResourceGroupName -eq "$ResourceGroupName" }
         if (-not $resources) {
             Write-Verbose "Removing resource group $ResourceGroupName"
-            $result = Remove-AzureRmResourceGroup -Name $ResourceGroupName -ErrorAction Continue
+            $result = Remove-AzResourceGroup -Name $ResourceGroupName -ErrorAction Continue
         }
     } else {
         Write-Verbose "Keeping resource group... $ResourceGroupName"
