@@ -78,6 +78,8 @@ function RemoveStorageBlobByUri {
 }
 
 ##########################################################################
+
+#region check parameters
 Write-Verbose "Getting VM info for $VmName"
 
 # get vm information
@@ -116,12 +118,15 @@ if (-not $Force) {
         return
     }
 }
+#endregion
 
 try {
+    #region delete the VM
     Write-Verbose "Removing VirtualMachine $($ResourceGroupName) / $($VmName)"
     $result = Remove-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName -Force -ErrorAction 'Stop'
+    #endregion
 
-    # remove all Nics, if necessary
+    #region all Nics, if necessary
     if (-not $KeepNetworkInterface) {
         $nicIds = $vm.NetworkProfile.Networkinterfaces.Id
 
@@ -162,8 +167,9 @@ try {
     } else {
         Write-Verbose "Keeping network interface(s)... $($vm.NetworkInterfaceIDs)"
     }
+    #endregion
 
-    # remove OSDisk, if necessary
+    #region OSDisk, if necessary
     if (-not $KeepOsDisk) {
         # remove os managed disk
         $managedDiskId = $vm.StorageProfile.OsDisk.ManagedDisk.id
@@ -182,8 +188,9 @@ try {
     } else {
         Write-Verbose "Keeping OS disks..."
     }
+    #endregion
 
-    # remove DataDisks all data disks, if necessary
+    #region DataDisks all data disks, if necessary
     $dataDisks = $vm.StorageProfile.DataDisks
     if (-not $KeepDataDisk) {
         foreach ($dataDisk in $dataDisks) {
@@ -204,8 +211,9 @@ try {
     } else {
         Write-Verbose "Keeping data disks..."
     }
+    #endregion
 
-    # delete diagnostic logs
+    #region diagnostic logs
     if (-not $KeepDiagnostics) {
         $storageUri = $vm.DiagnosticsProfile.BootDiagnostics.StorageUri
         if ($storageUri) {
@@ -228,8 +236,9 @@ try {
     } else {
         Write-Verbose "Keeping diagnostic logs... $($vm.DiagnosticsProfile.BootDiagnostics.StorageUri)"
     }
+    #endregion
 
-    # remove ResourceGroup, if nothing else inside
+    #region ResourceGroup, if nothing else inside
     if (-not $KeepResourceGroup) {
         Write-Verbose "Checking ResourceGroup $ResourceGroupName"
         $resources = Get-AzResource | Where-Object {$_.ResourceGroupName -eq "$ResourceGroupName" }
@@ -240,6 +249,7 @@ try {
     } else {
         Write-Verbose "Keeping resource group... $ResourceGroupName"
     }
+    #endregion
 
 } catch {
     $_.Exception
