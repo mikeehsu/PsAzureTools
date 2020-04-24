@@ -60,7 +60,7 @@ CompressFilesToBlob.ps1 -SourceFilePath C:\TEMP\archivefiles -ContainerURI 'http
 
 [CmdletBinding()]
 param (
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory)]
     [string] $SourceFilePath,
     
     [Parameter(ParameterSetName = "StorageAccount", Mandatory = $true)]
@@ -72,44 +72,35 @@ param (
     [Parameter(ParameterSetName = "ContainerURI", Mandatory = $true)]
     [string] $ContainerURI,
 
-    [Parameter(Mandatory = $false)]
     [string] $BlobName,
 
-    [Parameter(Mandatory = $false)]
     [ValidateSet('Date', 'Time')]
     [string] $AppendToBlobName,
 
-    [Parameter(Mandatory = $false)]
     [ValidateSet(0,1,2,3,4,5,6,7,8,9)]
     [int] $CompressionLevel = 5,
 
-    [Parameter(Mandatory = $false)]
     [string] $CompressTempDir = $env:TEMP,
 
-    [Parameter(Mandatory = $false)]
     [switch] $SeparateEachDirectory,
 
-    [Parameter(Mandatory = $false)]
     [ValidateSet('Simple', 'Full', 'None')]
     [string] $IntegrityCheck = "Simple",
 
-    [Parameter(Mandatory = $false)]
     [ValidateSet('Hot', 'Cool', 'Archive')]
     [string] $BlobTier,
 
-    [Parameter(Mandatory = $false)]
+    [Alias("CompletedDir")]
     [string] $CleanUpDir,
 
-    [Parameter(Mandatory = $false)]
     [string] $ZipCommandDir = "",
 
-    [Parameter(Mandatory = $false)]
     [string] $AzCopyCommandDir = "",
 
-    [Parameter(ParameterSetName = "StorageAccount", Mandatory = $false)]
+    [Parameter(ParameterSetName = "StorageAccount")]
     [switch] $UseManagedIdentity,
 
-    [Parameter(ParameterSetName = "StorageAccount", Mandatory = $false)]
+    [Parameter(ParameterSetName = "StorageAccount")]
     [string] $Environment
 
 )
@@ -195,7 +186,7 @@ function IntegrityCheckSimple {
 
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string] $filePath
     )
 
@@ -215,10 +206,10 @@ function CompressPathToBlob {
 
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string] $sourcePath,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string] $archivePath
     )
 
@@ -276,10 +267,10 @@ function CopyFileToContainer {
 
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string] $filePath,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string] $containerURI
     )
     
@@ -350,10 +341,10 @@ Function CleanUpSource {
 
     [cmdletbinding()]
     Param (
-        [Parameter(Mandatory=$True)]
+        [Parameter(Mandatory)]
         [string] $sourcePath,
 
-        [Parameter(Mandatory=$True)]
+        [Parameter(Mandatory)]
         [string] $cleanUpDir
     )
 
@@ -375,6 +366,7 @@ Function CleanUpSource {
 # MAIN
 
 # check 7z command path
+Write-Progress -Activity "Checking environment..." -Status "validating 7z"
 if ($ZipCommandDir -and -not $ZipCommandDir.EndsWith('\')) {
     $ZipCommandDir += '\'
 }
@@ -385,6 +377,7 @@ if (-not $?) {
 }
 
 # check azcopy path
+Write-Progress -Activity "Checking environment..." -Status "validating AzCopy"
 if ($AzCopyCommandDir -and -not $AzCopyCommandDir.EndsWith('\')) {
     $AzCopyCommandDir += '\'
 }
@@ -398,6 +391,7 @@ catch {
 }
 
 # login if using managed identities
+Write-Progress -Activity "Checking environment..." -Status "validating Azure identity/environment"
 if ($UseManagedIdentity) {
     try {
         $params = @{ }
@@ -431,7 +425,7 @@ if ($UseManagedIdentity) {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') { 
-    # login to powershell az commands
+    Write-Progress -Activity "Checking environment..." -Status "validating Storage Account"
     try {
         $result = Get-AzContext -ErrorAction Stop
         if (-not $result.Environment) {
@@ -491,6 +485,7 @@ if ($BlobName -and $SeparateEachDirectory) {
     throw "-BlobName and -SeparateEachDirectory can not be used together."
 }
 
+Write-Progress -Activity "Checking environment..." -Status "reading source directory"
 if ($SeparateEachDirectory) {
     # loop through each directory and upload a separate zip
     $sourcePaths = $(Get-ChildItem $SourceFilePath | Where-Object { $_.PSIsContainer }).FullName
