@@ -1,9 +1,26 @@
+<#
+.SYNOPSIS
+Resstore the contents of a backup zip flie to a KeyVault
+
+.DESCRIPTION
+This script will copy the restore the contents of a ZIP archive file to an Azure KeyVault
+    
+.PARAMETER VaultName
+Name of the Azure KeyVault to restore to
+
+.PARAMETER OutputFile
+Name of the archive file to restore
+
+.EXAMPLE
+Restore-KeyVault.ps1 -VaultName MyKeyVault -InputFile "MyKeyVault.zip"
+#>
+
 Param (
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory)]
     [string] $VaultName,
 
-    [Parameter(Mandatory = $true)]
-    [string] $InputPath
+    [Parameter(Mandatory)]
+    [string] $InputFile
 )
 
 #################################################
@@ -13,7 +30,7 @@ Param (
 try {
     $result = Get-AzContext -ErrorAction Stop
     if (-not $result.Environment) {
-        throw"Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
+        throw "Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
     }
 }
 catch {
@@ -21,7 +38,7 @@ catch {
 }
 
 # create folder for storing keys
-$filename = Split-Path $InputPath -Leaf -Resolve
+$filename = Split-Path $InputFile -Leaf -Resolve
 if ($filename.substring($filename.length - 4) -eq '.zip') {
     $filename = $filename.substring(0, $filename.length - 4)
 }
@@ -36,7 +53,7 @@ else {
     $expandPath = "./$filename"
 }
 
-# check InputPath
+# check InputFile
 if (Test-Path $expandPath) {
     $answer = Read-Host -Prompt "$expandPath already exsits. Overwrite? (Y/N)"
     if (-not $answer.StartsWith('Y')) {
@@ -45,7 +62,7 @@ if (Test-Path $expandPath) {
 }
 
 # expand zip to a folder
-Expand-Archive -Path $InputPath -DestinationPath $expandPath -Force
+Expand-Archive -Path $InputFile -DestinationPath $expandPath -Force
 
 
 # get keyvault
@@ -65,20 +82,20 @@ foreach ($keyFile in $keyFiles) {
         Write-Output "Unable to load key from $($keyFile.Name)"
     }
     else {
-        $count += 1
+        $count++
     }
 }
 
 # restore secrets
 $secretFiles = Get-Item "$expandPath/*.secret"
 foreach ($secretFile in $secretFiles) {
-    Write-Verbose "secret: $($secretFile.Name)"
+    Write-Verbose "SECRET: $($secretFile.Name)"
     $result = Restore-AzKeyVaultsecret -VaultName $VaultName -InputFile "$expandPath/$($secretFile.Name)"
     if (-not $result) {
         Write-Output "Unable to load secret from $($secretFile.Name)"
     }
     else {
-        $count += 1
+        $count++
     }
 }
 
@@ -91,7 +108,7 @@ foreach ($certFile in $certFiles) {
         Write-Output "Unable to load certificate from $($certFile.Name)"
     }
     else {
-        $count += 1
+        $count++
     }
 }
 
