@@ -57,37 +57,37 @@
 ##############################
 
 Param (
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory)]
     [string] $FilePath,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter()]
     [string] $ConfigFilePath,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory)]
     [string] $UserId,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory)]
     [string] $Password,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter()]
     [string] $DbServer,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter()]
     [string] $Database,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter()]
     [string] $Table,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter()]
     [string] $Delimiter,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter()]
     [string] $Skip,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter()]
     [int] $BatchSize,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter()]
     [int] $StartOnDataRow = 1
 )
 
@@ -246,10 +246,10 @@ for ($i=0; $i -lt $columns.Count; $i++) {
     $null = $tableData.Columns.Add($column.column_name)
 
     # find matching database columns & map them
-    $match = $fileColumns | Get-Member -Type Properties | Where-Object {$_.name -eq $column.column_name}
+    $match = $fileColumns | Get-Member -Type Properties | Where-Object {$_.name -and $_.name.Trim() -eq $column.column_name.Trim()}
 
     if ($match) {
-        $matchConstant = $map.Constants.PSObject.Properties | Where-Object {$_.name -eq $column.column_name}
+        $matchConstant = $map.Constants.PSObject.Properties | Where-Object {$_.name -and $_.name.Trim() -eq $column.column_name.Trim()}
         if ($matchConstant) {
             # column also mapped to a constant, leave unmapped for constant to override later
             $fileColumnName = $null
@@ -340,7 +340,7 @@ $lineCount = 0
 $fileInfo = $(Get-ChildItem $filePath)
 try {
     $reader = New-Object IO.StreamReader $($fileInfo.Fullname) -ErrorAction Stop
-    while ($reader.ReadLine() -ne $null) {
+    while ($null -ne $reader.ReadLine()) {
         $lineCount++
     }
     $reader.Close()
@@ -382,6 +382,7 @@ Get-Content -Path $filePath -ErrorAction Stop |
     $rowNumber++
     if ($rowNumber -ge $StartOnDataRow) {
 
+        # fileRow is used in a Invoke-Expression
         $fileRow = $_
 
         # assign expanded JSON if any
