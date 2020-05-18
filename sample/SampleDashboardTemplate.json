@@ -1,0 +1,94 @@
+{
+  "properties": {
+    "lenses": {
+      "0": {
+        "order": 0,
+        "parts": {
+          "0": {
+            "position": {
+              "x": 0,
+              "y": 0,
+              "colSpan": 11,
+              "rowSpan": 6
+            },
+            "metadata": {
+              "inputs": [],
+              "type": "Extension/HubsExtension/PartType/MarkdownPart",
+              "settings": {
+                "content": {
+                  "settings": {
+                    "content": "<!-- Invoke-SqlCmd \"DECLARE @BeginDate DATE='$((QuarterBegin -Date (Get-Date).AddMonths(-1)).ToString('yyyyMMdd'))', @EndDate DATE='$((QuarterEnd).ToString('yyyyMMdd'))'; SELECT [Meter Sub-Category], [Meter Name], [ResourceRate], FORMAT(SUM([Consumed Quantity]),'G','en-us') AS [Consumbed Quantity], FORMAT(SUM(ExtendedCost),'C','en-us') AS [Extended Cost] FROM AzureUsage WHERE [Meter Category] = 'Virtual Machines' AND [Date]>= @BeginDate AND [Date] <= @EndDate GROUP BY [Meter Sub-Category], [Meter Name], [ResourceRate] ORDER BY 1,2,3\" -ConnectionString $($Config.DBConnectionString) | FormatMarkdownTable -TableHeader '|-|-|-:|-:|-:|' -->\n",
+                    "title": "Virtual Machine Breakdown",
+                    "subtitle": "<!-- $((QuarterBegin -Date (Get-Date).AddMonths(-1)).ToString('yyyyMMdd')) --> thru <!-- $((QuarterEnd).ToString('yyyyMMdd')) -->"
+                  }
+                }
+              }
+            }
+          },
+          "1": {
+            "position": {
+              "x": 0,
+              "y": 6,
+              "colSpan": 11,
+              "rowSpan": 5
+            },
+            "metadata": {
+              "inputs": [],
+              "type": "Extension/HubsExtension/PartType/MarkdownPart",
+              "settings": {
+                "content": {
+                  "settings": {
+                    "content": "\n<!-- Invoke-SqlCmd \"DECLARE @BeginDate DATE='$((QuarterBegin -Date (Get-Date).AddMonths(-1)).ToString('yyyyMMdd'))', @EndDate DATE='$((QuarterEnd).ToString('yyyyMMdd'))'; SELECT [Meter Sub-Category], [Meter Name], [ResourceRate], FORMAT(SUM([Consumed Quantity]),'G','en-us') AS [Consumbed Quantity], FORMAT(SUM(ExtendedCost),'C','en-us') AS [Extended Cost] FROM AzureUsage WHERE [Meter Category] = 'Storage' AND [Date]>= @BeginDate AND [Date] <= @EndDate GROUP BY [Meter Sub-Category], [Meter Name], [ResourceRate] ORDER BY 1,2,3\" -ConnectionString $($Config.DBConnectionString) | FormatMarkdownTable -TableHeader '|-|-|-:|-:|-:|' -->\n\n\n",
+                    "title": "Storage Breakdown - <!-- $((QuarterBegin -Date (Get-Date).AddMonths(-1)).ToString('yyyyMMdd')) --> thru <!-- $((QuarterEnd).ToString('yyyyMMdd')) -->",
+                    "subtitle": ""
+                  }
+                }
+              }
+            }
+          },
+          "2": {
+            "position": {
+              "x": 0,
+              "y": 11,
+              "colSpan": 11,
+              "rowSpan": 3
+            },
+            "metadata": {
+              "inputs": [],
+              "type": "Extension/HubsExtension/PartType/MarkdownPart",
+              "settings": {
+                "content": {
+                  "settings": {
+                    "content": "<!-- Invoke-SqlCmd \"DECLARE @BeginDate DATE='$((QuarterBegin -Date (Get-Date).AddMonths(-1)).ToString('yyyyMMdd'))', @EndDate DATE='$((QuarterEnd).ToString('yyyyMMdd'))'; SELECT [Meter Sub-Category], [Meter Name], [ResourceRate], FORMAT(SUM([Consumed Quantity]),'G','en-us') AS [Consumbed Quantity], FORMAT(SUM(ExtendedCost),'C','en-us') AS [Extended Cost] FROM AzureUsage WHERE [Meter Category] = 'ExpressRoute' AND [Date]>= @BeginDate AND [Date] <= @EndDate GROUP BY [Meter Sub-Category], [Meter Name], [ResourceRate] ORDER BY 1,2,3\" -ConnectionString $($Config.DBConnectionString) | FormatMarkdownTable -TableHeader '|-|-|-:|-:|-:|' -->\n",
+                    "title": "Express Route Breakdown",
+                    "subtitle": "<!-- $((QuarterBegin -Date (Get-Date).AddMonths(-1)).ToString('yyyyMMdd')) --> thru <!-- $((QuarterEnd).ToString('yyyyMMdd')) -->"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "model": {
+        "timeRange": {
+          "value": {
+            "relative": {
+              "duration": 24,
+              "timeUnit": 1
+            }
+          },
+          "type": "MsPortalFx.Composition.Configuration.ValueTypes.TimeRange"
+        }
+      }
+    }
+  },
+  "name": "Dashboard Template",
+  "type": "Microsoft.Portal/dashboards",
+  "location": "INSERT LOCATION",
+  "tags": {
+    "hidden-title": "Dashboard Template"
+  },
+  "apiVersion": "2015-08-01-preview"
+}
