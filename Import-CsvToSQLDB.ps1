@@ -154,12 +154,14 @@ function MappingProcessObject {
 
 ##############################
 
+#region -- initialize moddules & variables
 [void][Reflection.Assembly]::LoadWithPartialName("System.Data")
 [void][Reflection.Assembly]::LoadWithPartialName("System.Data.SqlClient")
 
 $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
+#endregion
 
-#REGION load mapping file
+#region -- Load mapping file
 if ($ConfigFilePath) {
     $map = Get-Content $ConfigFilePath | ConvertFrom-Json
 
@@ -212,11 +214,11 @@ if (-not $Skip) {
 if (-not $BatchSize) {
     $BatchSize = 1000
 }
-#ENDREGION
+#endregion
 
 $connectionString = "Server=$DbServer;Database=$Database;User Id=$UserId;Password=$Password"
 
-#REGION create column mapping for row data
+#region -- Create column mapping for row data
 # get columns from table
 $head = $Skip + 2 # skip down to header rows
 Write-Verbose "Loading column headers..."
@@ -282,9 +284,9 @@ foreach ($property in $map.ColumnMappings.PSObject.Properties) {
         $mapJsonItems += $property.name
     }
 }
-#ENDREGION
+#endregion
 
-#REGION Build all assignment expressions
+#region -- Build all assignment expressions
 # build column assignments
 $rowExpression = ''
 foreach ($item in $mapping) {
@@ -327,14 +329,14 @@ foreach ($constant in $map.Constants.PSObject.Properties) {
     }
     $constantExpression += "`$tableRow[$($match.dbColumnNum)] = '" + $constant.value + "'"
 }
-#ENDREGION
 
 # debug output
 Write-Verbose "Constants: $constantExpression"
 Write-Verbose "JSON expansion: $expandJsonExpression"
 Write-Verbose "Mapped Columns: $rowExpression"
+#endregion
 
-#REGION load the data from file
+#region -- Get rowcount of file
 # get line count using streamreader, much faster than Get-Content for large files
 $lineCount = 0
 $fileInfo = $(Get-ChildItem $filePath)
@@ -348,10 +350,12 @@ try {
     throw
     return
 }
+#endregion
 
 Write-Verbose "$lineCount lines in $($fileInfo.FullName)"
 $lineCount -= $Skip + $StartOnDataRow
 
+#region -- Load the data from file
 # create bulkcopy connection
 $bulkcopy = New-Object Data.SqlClient.SqlBulkCopy($connectionstring, [System.Data.SqlClient.SqlBulkCopyOptions]::TableLock)
 $bulkcopy.DestinationTableName = $Table
@@ -419,13 +423,15 @@ if ($tableData.Rows.Count -gt 0) {
     $tableData.Clear()
 }
 
-#ENDREGION
-
+Write-Progress -Activity "Loading rows to database..." -Completed
 Write-Output "$added rows have been inserted into the database."
 Write-Output "Total Elapsed Time: $($elapsed.Elapsed.ToString())"
+#endregion
 
-# Clean Up
+
+#region -- Clean Up and release memory
 $bulkcopy.Close()
 $bulkcopy.Dispose()
 
 [System.GC]::Collect()
+#endregion
