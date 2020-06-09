@@ -31,7 +31,7 @@ Param (
 #################################################
 # MAIN
 
-# region - confirm user is logged into subscription
+#region - confirm user is logged into subscription
 try {
     $result = Get-AzContext -ErrorAction Stop
     if (-not $result.Environment) {
@@ -41,9 +41,9 @@ try {
 catch {
     throw "Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
 }
-# endregion
+#endregion
 
-# region - validate parameter values
+#region - validate parameter values
 # check OutputFile path
 if (-not $OutputFile) {
     $OutputFile = "$VaultName-backup.zip"
@@ -66,7 +66,7 @@ if (Test-Path "$backupPath/*") {
     throw "Backup folder $backupPath exists. Please make sure it is empty before starting."
 }
 $null = New-Item -Path $backupPath -ItemType Directory -ErrorAction Stop
-# endregion
+#endregion
 
 $certCount = 0
 $keyCount = 0
@@ -78,7 +78,7 @@ if (-not $vault) {
     throw "Unable to open key vault - $VaultName"
 }
 
-# region - backup certificates
+#region - backup certificates
 $certs = Get-AzKeyVaultCertificate -VaultName $vault.VaultName
 foreach ($cert in $certs) {
     Write-Verbose $cert.Name
@@ -86,9 +86,9 @@ foreach ($cert in $certs) {
     $null = Backup-AzKeyVaultCertificate -VaultName $VaultName -Name $cert.Name -OutputFile "$backupPath/$($cert.Name).certificate"
     $certCount++
 }
-# endregion
+#endregion
 
-# region - backup keys
+#region - backup keys
 # need to filter out certs that are getting returned by Get-AzKeyVaultKey
 $keys = Get-AzKeyVaultKey -VaultName $vault.VaultName | Where-object {$certs.Name -notcontains $_.Name}
 foreach ($key in $keys) {
@@ -97,9 +97,9 @@ foreach ($key in $keys) {
     $null = Backup-AzKeyVaultKey -VaultName $VaultName -Name $key.Name -OutputFile "$backupPath/$($key.Name).key"
     $keyCount++
 }
-# endregion
+#endregion
 
-# region - backup secrets
+#region - backup secrets
 # need to filter out certs that are getting returned by Get-AzKeyVaultSecret
 $secrets = Get-AzKeyVaultSecret -VaultName $vault.VaultName | Where-object {$certs.Name -notcontains $_.Name}
 foreach ($secret in $secrets) {
@@ -108,13 +108,13 @@ foreach ($secret in $secrets) {
     $null = Backup-AzKeyVaultSecret -VaultName $VaultName -Name $secret.Name -OutputFile "$backupPath/$($secret.Name).secret"
     $secretCount++
 }
-# endregion
+#endregion
 
-# region - package all the backup files into a zip
+#region - package all the backup files into a zip
 Write-Progress -Activity "Backing up $($vault.VaultName)" -Status "Creating archive $($OutputFile)"
 Compress-Archive -Path "$backupPath/*" -DestinationPath $OutputFile
 Write-Progress -Activity "Backing up $($vault.VaultName)" -Complete
-# endregion
+#endregion
 
 # clean up
 Remove-item -Path $backupPath -Force -Recurse
