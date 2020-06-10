@@ -14,6 +14,9 @@ Resource Group Name of the Storage Account
 .PARAMETER StorageAccountName
 Storage Account Name for the Storage Account
 
+.PARAMETER Hours
+Number of hours in the past to retrieve metrics
+
 .EXAMPLE
 Get-StorageAccountUsedCapacity.ps1 -ResourceGroupName MyResourceGroup -StorageAccountName mystorageaccount
 
@@ -34,7 +37,7 @@ param (
     [string] $StorageAccountName,
 
     [Parameter()]
-    [Int] $PreviousHours = -4
+    [Int] $Hours = 4
 )
 
 begin {
@@ -62,7 +65,7 @@ process {
         $Id = $storageAccount.Id
     }
 
-    $metric = Get-AzMetric -ResourceId $Id -MetricName 'UsedCapacity' -StartTime (((Get-Date).AddHours($PreviousHours)) -f 'yyyy-MM-dd') -ErrorAction SilentlyContinue
+    $metric = Get-AzMetric -ResourceId $Id -MetricName 'UsedCapacity' -StartTime (((Get-Date).AddHours($Hours * -1)) -f 'yyyy-MM-dd') -ErrorAction SilentlyContinue
     if (-not $metric) {
         Write-Warning "$Id, metrics not found"
         return $null
