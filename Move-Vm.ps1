@@ -1,28 +1,33 @@
-##############################
-#.SYNOPSIS
-# Move a Virtual Machine with Managed Disks attached to a new Availability Set
-#
-#.DESCRIPTION
-# This script will move a Virtual Machine with managed disks attached to a
-# new availability set. The availability set must already exist before executing
-# this command.
-#
-#.PARAMETER ResourceGroupName
-# The resource group name of the virtual machine to be moved.
-#
-#.PARAMETER VmName
-# The name of the virutal machine to be moved.
-#
-#.PARAMETER AvailabilitySetName
-# The name of the availability set to move the virtual machine to.
-##
-#.EXAMPLE
-# MoveVmToAvailabilitySet.ps1 -ResourceGroupName myRg -VmName myVm -AvailabilitySetName myAvSet
-#
-#.NOTES
-# Because a new VM is created, you should check:
-# diagnostic storage account assigned to the new VM to ensure the logs are written to the proper account
-####################################
+<#
+.SYNOPSIS
+Move a Virtual Machine with Managed Disks attached to a new Availability Set
+
+.DESCRIPTION
+This script will move a Virtual Machine with managed disks attached to a
+new availability set. The availability set must already exist before executing
+this command.
+
+.PARAMETER ResourceGroupName
+The resource group name of the virtual machine to be moved.
+
+.PARAMETER VmName
+The name of the virutal machine to be moved.
+
+.PARAMETER AvailabilitySetName
+The name of the availability set to move the virtual machine to.
+
+.PARAMETER RemoveAvailabilitySet
+Set this switch to remove the VM from an availability set
+
+.PARAMETER VmSize
+Provide a new VmSize to resize the VM
+
+.EXAMPLE
+Move-VM.ps1 -ResourceGroupName myRg -VmName myVm -AvailabilitySetName myAvSet
+
+.NOTES
+Because a new VM is created, you should check the diagnostic storage account assigned to the new VM to ensure the logs are written to the proper account
+#>
 
 Param (
     [Parameter(Mandatory)]
