@@ -1,12 +1,17 @@
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 
 Param(
-    [Parameter(Mandatory)]
-    [ValidateNotNullOrEmpty()]
-    [string] $VmName,
+    [Parameter(Position = 0, Mandatory, ParameterSetName = 'Vm', ValueFromPipeline)]
+    [Object[]] $Vm,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'VmName', ValueFromPipelineByPropertyName)]
+    [ValidateNotNullOrEmpty()]
     [string] $ResourceGroupName,
+
+    [Parameter(Mandatory, ParameterSetName = 'VmName', ValueFromPipelineByPropertyName)]
+    [ValidateNotNullOrEmpty()]
+    [Alias('Name')]
+    [string] $VmName,
 
     [switch] $KeepNetworkInterface,
 
@@ -31,7 +36,7 @@ function RemoveNetworkSecurityGroupById {
     [CmdletBinding()]
 
     Param(
-        [parameter(Mandatory=$True)]
+        [parameter(Mandatory = $True)]
         [string] $nsgId
     )
 
@@ -42,7 +47,8 @@ function RemoveNetworkSecurityGroupById {
     $nsg = Get-AzNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Name $networkSecurityGroupName
     if ($nsg.NetworkInterfaces -or $nsg.Subnets) {
         Write-Verbose "NetworkSecurityGroup $($resourceGroupName) / $($networkSecurityGroupName) is still being used"
-    } else {
+    }
+    else {
         Write-Verbose "Removing NetworkSecurityGroup $($resoruceGroupName) / $($networkSecurityGroupName)"
         $null = Remove-AzNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Name $networkSecurityGroupName -Force
     }
@@ -53,10 +59,8 @@ function RemoveNetworkSecurityGroupById {
 ##########################################################################
 function RemoveStorageBlobByUri {
 
-    [CmdletBinding()]
-
     Param(
-        [parameter(Mandatory=$True)]
+        [parameter(Mandatory = $True)]
         [string] $Uri
     )
 
@@ -64,9 +68,9 @@ function RemoveStorageBlobByUri {
     $uriParts = $Uri.Split('/')
     $storageAccountName = $uriParts[2].Split('.')[0]
     $container = $uriParts[3]
-    $blobName = $uriParts[4..$($uriParts.Count-1)] -Join '/'
+    $blobName = $uriParts[4..$($uriParts.Count - 1)] -Join '/'
 
-    $resourceGroupName = $(Get-AzStorageAccount | Where-Object {$_.StorageAccountName -eq "$storageAccountName"}).ResourceGroupName
+    $resourceGroupName = $(Get-AzStorageAccount | Where-Object { $_.StorageAccountName -eq "$storageAccountName" }).ResourceGroupName
     if (-not $resourceGroupName) {
         Write-Error "Error getting ResourceGroupName for $Uri"
         return
@@ -80,14 +84,19 @@ function RemoveStorageBlobByUri {
 ##########################################################################
 
 #region check parameters
-Write-Verbose "Getting VM info for $VmName"
+if ($PSCmdlet.ParameterSetName -eq 'Vm') {
+    $ResourceGroupName = $vm.ResourceGroupName
+    $VmName = $vm.Name
 
+}
+
+Write-Verbose "Getting VM info for $VmName"
 # get vm information
 if ($ResourceGroupName) {
     $vm = Get-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName -ErrorAction 'Stop'
 }
 else {
-    $vm = Get-AzVM | Where-Object {$_.Name -eq $VmName}
+    $vm = Get-AzVM | Where-Object { $_.Name -eq $VmName }
 
     # no Vm's found
     if (-not $vm) {
@@ -112,18 +121,20 @@ if (-not $vm) {
 
 # confirm machine
 if (-not $Force) {
-    $confirmation = Read-Host "Are you sure you want to remove $($ResourceGroupName) / $($VmName)?"
-    if ($confirmation.ToUpper() -ne 'Y') {
-        Write-Output 'Command Aborted.'
+    if (-not $PSCmdlet.ShouldContinue("Are you sure?", "Remove $($ResourceGroupName)/$($VmName)")) {
+        Write-Host 'Command Aborted.'
         return
     }
+    $ConfirmImpact="Low"
 }
 #endregion
 
 try {
     #region delete the VM
-    Write-Verbose "Removing VirtualMachine $($ResourceGroupName) / $($VmName)"
-    $result = Remove-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName -Force -ErrorAction 'Stop'
+    if ($Force -or $PSCmdlet.ShouldProcess($VmName, "Remove-AzVm")) {
+        Write-Verbose "Removing VirtualMachine $($ResourceGroupName) / $($VmName)"
+        $result = Remove-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName -Force -ErrorAction 'Stop'
+    }
     #endregion
 
     #region all Nics, if necessary
@@ -135,8 +146,10 @@ try {
             $nicResource = Get-AzResource -ResourceId $nicId -ErrorAction 'Stop'
             $nic = Get-AzNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.Name)
 
-            Write-Verbose "Removing NetworkInterface $($nicResource.ResourceGroupName) / $($nicResource.Name)"
-            $result = Remove-AzNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.Name) -Force
+            if ($Force -or $PSCmdlet.ShouldProcess($nicResource.Name, "Remove-AzNetworkInterface")) {
+                Write-Verbose "Removing NetworkInterface $($nicResource.ResourceGroupName) / $($nicResource.Name)"
+                $result = Remove-AzNetworkInterface -ResourceGroupName $($nicResource.ResourceGroupName) -Name $($nicResource.Name) -Force
+            }
 
             # remove any Public IPs (attached to Nic), if necessary
             if (-not $KeepPublicIp) {
@@ -146,11 +159,15 @@ try {
                     $pipResource = Get-AzResource -ResourceId $pipId -ErrorAction 'Stop'
 
                     if ($pipResource) {
-                        Write-Verbose "Removing public IP $($nic.IpConfigurations.publicIpAddress.Id)"
-                        $result = $( Get-AzPublicIpAddress -ResourceGroupName $($pipResource.ResourceGroupName) -Name $($pipResource.Name) | Remove-AzPublicIpAddress -Force )
+                        if ($Force -or $PSCmdlet.ShouldProcess($pipResource.Name, "Remove-AzPublicIpAddress")) {
+                            Write-Verbose "Removing public IP $($nic.IpConfigurations.publicIpAddress.Id)"
+                            $result = $( Get-AzPublicIpAddress -ResourceGroupName $($pipResource.ResourceGroupName) -Name $($pipResource.Name) | Remove-AzPublicIpAddress -Force )
+
+                        }
                     }
                 }
-            } else {
+            }
+            else {
                 Write-Verbose "Keeping public IP..."
             }
 
@@ -160,11 +177,13 @@ try {
                     Write-Verbose "Removing network security group $($nic.NetworkSecurityGroup.Id)"
                     $result = RemoveNetworkSecurityGroupById -nsgId $nic.NetworkSecurityGroup.Id
                 }
-            } else {
+            }
+            else {
                 Write-Verbose "Keeping network security group..."
             }
         }
-    } else {
+    }
+    else {
         Write-Verbose "Keeping network interface(s)... $($vm.NetworkInterfaceIDs)"
     }
     #endregion
@@ -175,17 +194,22 @@ try {
         $managedDiskId = $vm.StorageProfile.OsDisk.ManagedDisk.id
         if ($managedDiskId) {
             $managedDiskName = $managedDiskId.Split('/')[8]
-            Write-Verbose "Removing ManagedDisk $($ResourceGroupName) / $($managedDiskName)"
-            $result = Remove-AzDisk -ResourceGroupName $ResourceGroupName -DiskName $managedDiskName -Force
-        }
+            if ($Force -or $PSCmdlet.ShouldProcess($managedDiskName, "Remove-AzDisk")) {
+                Write-Verbose "Removing ManagedDisk $($ResourceGroupName) / $($managedDiskName)"
+                $result = Remove-AzDisk -ResourceGroupName $ResourceGroupName -DiskName $managedDiskName -Force
 
+            }
+        }
         # remove os disk
         $osDisk = $vm.StorageProfile.OsDisk.Vhd.Uri
         if ($osDisk) {
-            Write-Verbose "Removing OSDisk $osDisk"
-            $result = RemoveStorageBlobByUri -Uri $osDisk
+            if ($Force -or $PSCmdlet.ShouldProcess($osDisk, "Remove Storage Blob")) {
+                Write-Verbose "Removing OSDisk $osDisk"
+                $result = RemoveStorageBlobByUri -Uri $osDisk
+            }
         }
-    } else {
+    }
+    else {
         Write-Verbose "Keeping OS disks..."
     }
     #endregion
@@ -197,18 +221,23 @@ try {
             $managedDiskId = $datadisk.ManagedDisk.id
             if ($managedDiskId) {
                 $managedDiskName = $managedDiskId.Split('/')[8]
-                Write-Verbose "Removing Managed Disk $($ResourceGroupName) / $($managedDiskName)"
-                $result = Remove-AzDisk -ResourceGroupName $ResourceGroupName -DiskName $managedDiskName -Force
+                if ($Force -or $PSCmdlet.ShouldProcess($managedDiskName, "Remove-AzDisk")) {
+                    Write-Verbose "Removing Managed Disk $($ResourceGroupName) / $($managedDiskName)"
+                    $result = Remove-AzDisk -ResourceGroupName $ResourceGroupName -DiskName $managedDiskName -Force
+                }
             }
 
             # remove os disk
             $vhdUri = $datadisk.Vhd.Uri
             if ($vhdUri) {
-                Write-Verbose "Removing Unmanaged VHD $vhdUri"
-                $result = RemoveStorageBlobByUri -Uri $vhdUri
+                if ($Force -or $PSCmdlet.ShouldProcess($vhdUri, "Remove Storage Blob")) {
+                    Write-Verbose "Removing Unmanaged VHD $vhdUri"
+                    $result = RemoveStorageBlobByUri -Uri $vhdUri -WhatIf:$WhatIfPreference
+                }
             }
         }
-    } else {
+    }
+    else {
         Write-Verbose "Keeping data disks..."
     }
     #endregion
@@ -220,20 +249,23 @@ try {
             $uriParts = $storageUri.Split('/')
             $storageAccountName = $uriParts[2].Split('.')[0]
 
-            $storageRg = $(Get-AzStorageAccount | Where-Object {$_.StorageAccountName -eq "$storageAccountName"}).ResourceGroupName
+            $storageRg = $(Get-AzStorageAccount | Where-Object { $_.StorageAccountName -eq "$storageAccountName" }).ResourceGroupName
             if (-not $storageRg) {
                 Write-Error "Error getting ResourceGroupName for $storageUri"
                 return
             }
 
             $null = Set-AzCurrentStorageAccount -ResourceGroupName $storageRg -StorageAccountName $storageAccountName
-            $container = Get-AzStorageContainer  | Where-Object {$_.Name -like "bootdiagnostics-*-$($vm.VmId)" }
+            $container = Get-AzStorageContainer | Where-Object { $_.Name -like "bootdiagnostics-*-$($vm.VmId)" }
             if ($container) {
-                Write-Verbose "Removing container: $($container.name) from resourceGroup: $storageRg, storageAccount: $storageAccountName"
-                Remove-AzStorageContainer -Name $($container.name) -Force
+                if ($Force -or $PSCmdlet.ShouldProcess("$storageAccountName/$($container.Name)", "Remove-AzStorageContainer")) {
+                    Write-Verbose "Removing container: $($container.name) from resourceGroup: $storageRg, storageAccount: $storageAccountName"
+                    Remove-AzStorageContainer -Name $($container.name) -Force
+                }
             }
         }
-    } else {
+    }
+    else {
         Write-Verbose "Keeping diagnostic logs... $($vm.DiagnosticsProfile.BootDiagnostics.StorageUri)"
     }
     #endregion
@@ -241,17 +273,21 @@ try {
     #region ResourceGroup, if nothing else inside
     if (-not $KeepResourceGroup) {
         Write-Verbose "Checking ResourceGroup $ResourceGroupName"
-        $resources = Get-AzResource | Where-Object {$_.ResourceGroupName -eq "$ResourceGroupName" }
+        $resources = Get-AzResource | Where-Object { $_.ResourceGroupName -eq "$ResourceGroupName" }
         if (-not $resources) {
-            Write-Verbose "Removing resource group $ResourceGroupName"
-            $result = Remove-AzResourceGroup -Name $ResourceGroupName -ErrorAction Continue
+            if ($Force -or $PSCmdlet.ShouldProcess("$ResourceGroupName", "Remove-AzResourceGroup")) {
+                Write-Verbose "Removing resource group $ResourceGroupName"
+                $result = Remove-AzResourceGroup -Name $ResourceGroupName -ErrorAction Continue
+            }
         }
-    } else {
+    }
+    else {
         Write-Verbose "Keeping resource group... $ResourceGroupName"
     }
     #endregion
 
-} catch {
+}
+catch {
     $_.Exception
     Write-Error $_.Exception.Message
     Write-Error $result
