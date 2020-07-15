@@ -46,11 +46,11 @@
 # writing the results to the database.
 #
 #.PARAMETER StartOnDataRow
-# This parameter specifies which data row to start loading on, 
+# This parameter specifies which data row to start loading on,
 # skipping unnecessary data rows immediately after the header.
 #
 #.EXAMPLE
-# .\LoadCsvToDB.ps1 -FilePath SampleCsv.csv -ConfigFilePath .\Sample\SampleLoadCsvToDBForBilling.json
+# Import-CsvToSqlDb.ps1 -FilePath SampleCsv.csv -ConfigFilePath .\Sample\SampleLoadCsvToDBForBilling.json
 #
 #.NOTES
 #
@@ -103,21 +103,21 @@ function MappingUpdateColumn {
     )
 
     # find all matching dbColumns
-    $matches = (0..($mapping.Count-1)) | Where-Object {$mapping[$_].dbColumn -eq $DbColumn}
-    if ($matches.Count -eq 0) {
+    $matchedColumns = (0..($mapping.Count-1)) | Where-Object {$mapping[$_].dbColumn -eq $DbColumn}
+    if ($matchedColumns.Count -eq 0) {
         Write-Error "Unable to find table column: $DbColumn" -ErrorAction Stop
         return
 
-    } elseif ($matches.Count -eq 0) {
+    } elseif ($matchedColumns.Count -eq 0) {
         Write-Error "Found too many matching table columns for: $DbColumn" -ErrorAction Stop
-        foreach ($i in $matches) {
+        foreach ($i in $matchedColumns) {
             Write-Error $($mapping[$i].fileColumn) -ErrorAction Stop
         }
         return
 
     }
 
-    $mapping[$matches[0]].fileColumn = $FileColumn
+    $mapping[$matchedColumns[0]].fileColumn = $FileColumn
     return $mapping
 }
 
@@ -150,6 +150,19 @@ function MappingProcessObject {
     }
 
     return $mapping
+}
+
+##############################
+Function IsNull {
+    param (
+        $a
+    )
+
+    if ($a) {
+        return $a
+    }
+
+    return $null
 }
 
 ##############################
@@ -297,7 +310,7 @@ foreach ($item in $mapping) {
     if ($rowExpression) {
         $rowExpression += "; "
     }
-    $rowExpression += "`$tableRow[$($item.dbColumnNum)] = `$fileRow." + $item.fileColumn
+    $rowExpression += "`$tableRow[$($item.dbColumnNum)] = IsNull `$fileRow." + $item.fileColumn
 }
 
 # build mapped JSON assignments
@@ -309,7 +322,7 @@ for ($i=0; $i -lt $mapJsonItems.count; $i++) {
 
     if ($map.ColumnWrapJson -and $map.ColumnWrapJson -contains $mapJsonItems[$i]) {
         # wrap brackets around JSON string
-        $expandJsonExpression += "if (`$fileRow.`'$($mapJsonItems[$i])`') { `$fileRow.'" + $mapJsonItems[$i] + "' = '{' + `$fileRow.'" + $mapJsonItems[$i] + "' + '}' | ConvertFrom-Json }"   
+        $expandJsonExpression += "if (`$fileRow.`'$($mapJsonItems[$i])`') { `$fileRow.'" + $mapJsonItems[$i] + "' = '{' + `$fileRow.'" + $mapJsonItems[$i] + "' + '}' | ConvertFrom-Json }"
     } else {
         $expandJsonExpression += "if (`$fileRow.`'$($mapJsonItems[$i])`') { `$fileRow.'" + $mapJsonItems[$i] + "' = `$fileRow.'" + $mapJsonItems[$i] + "' | ConvertFrom-Json }"
     }
