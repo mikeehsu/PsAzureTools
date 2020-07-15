@@ -33,26 +33,20 @@ function Invoke-AzRestMethod
         [string] $Body
     )
 
-    process
-    {
-        # construct request body object
-        $requestBodyAsJson = ConvertTo-Json -InputObject $Body -Depth 100
 
-        # construct headers
-        # 'Host'          = 'management.usgovcloudapi.net'
-        $headers = @{
-            'Content-Type'  = 'application/json';
-            'Authorization' = "Bearer $script:azToken";
-        }
-
-        if ($Method -eq 'GET') {
-            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $Headers
-        } else {
-            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $Headers -Body $requestBodyAsJson
-        }
-
-        return $response
+    # construct headers
+    $headers = @{
+        'Content-Type'  = 'application/json';
+        'Authorization' = "Bearer $script:azToken";
     }
+
+    if ($Method -eq 'GET') {
+        $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $Headers
+    } else {
+        $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $Headers -Body $Body
+    }
+
+    return $response
 }
 
 ######################## MAIN ########################
@@ -73,9 +67,9 @@ $script:azToken = Get-AzCachedAccessToken
 $environment = Get-AzEnvironment | Where-Object {$_.Name -eq $context.Environment}
 $script:azArmUrl = $([uri] $environment.ResourceManagerUrl).AbsoluteUri
 
-$ApiVersion = 'api-version=2020-01-01'
-$Uri = "{0}subscriptions/{1}?{2}" -f $script:azArmUrl, $context.Subscription.Id, $ApiVersion
+$apiVersion = '2020-01-01'
+$uri = "{0}subscriptions/{1}?api-version={2}" -f $script:azArmUrl, $context.Subscription.Id, $apiVersion
 
-$response = Invoke-AzRestMethod -Method 'GET' -Uri $Uri
+$response = Invoke-AzRestMethod -Method 'GET' -Uri $uri
 $response | ConvertTo-Json -Depth 10
 
