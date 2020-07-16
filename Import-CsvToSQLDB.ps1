@@ -249,6 +249,9 @@ if ($($fileColumns | Get-Member -Type Properties | Measure-Object).Count -eq 1) 
 
 Write-Verbose "Getting columns from Usage table..."
 $columns = Invoke-Sqlcmd -Query "SP_COLUMNS $Table" -ConnectionString $connectionString -ErrorAction Stop
+if (-not $columns) {
+    throw "Unable to load schema for $Table"
+}
 
 $tableData = New-Object System.Data.DataTable
 $tableRow = [Object[]]::new($columns.Count)
