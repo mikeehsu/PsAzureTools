@@ -33,14 +33,13 @@ function Invoke-AzRestMethod
         [string] $Body
     )
 
-
     # construct headers
     $headers = @{
         'Content-Type'  = 'application/json';
         'Authorization' = "Bearer $script:azToken";
     }
 
-    if ($Method -eq 'GET') {
+    if ($Method -eq 'GET' -or $Method -eq 'OPTIONS') {
         $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $Headers
     } else {
         $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $Headers -Body $Body
