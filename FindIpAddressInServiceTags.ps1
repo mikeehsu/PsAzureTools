@@ -3,7 +3,7 @@
 Search Service Tags for an IP Address
 
 .DESCRIPTION
-Searches through the Sevice Tag listings for a specific IP Address. 
+Searches through the Sevice Tag listings for a specific IP Address.
 
 .PARAMETER IPAddress
 IP Address to search for
@@ -163,7 +163,7 @@ Function Get-IPv4NetworkInfo {
     # $IPAddressInt        = [System.BitConverter]::ToUInt32($IPAddressBytes,0)
 
     #Calculate the number of hosts in our subnet, subtracting one to account for network address.
-    $NumberOfHosts = ($BroadcastAddressInt - $NetworkAddressInt) - 1        
+    $NumberOfHosts = ($BroadcastAddressInt - $NetworkAddressInt) - 1
 
     #Calculate the max and min usable host IPs.
     if ($NumberOfHosts -gt 1) {
@@ -256,15 +256,15 @@ if ($UseAPI) {
     }
     catch {
         throw "Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
-    }    
-    
+    }
+
     if ($Environment -and $Environment -ne $context.Environment.Name) {
         throw "-Environment must be the same as current context when -UseAPI is used. Please remove -Environment or -UseAPI."
     } else {
         $Environment = $context.Environment.Name
 
-    }    
-    
+    }
+
     # get tags across all locations in environment
     $serviceTags = @()
     $locations = Get-AzLocation
@@ -277,33 +277,33 @@ if ($UseAPI) {
     if (-not $environment) {
         $environment = $(Get-AzContext).Environment.Name
     }
-    
+
     if ($environment -eq 'AzureCloud') {
         $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=56519'
-    
+
     }
     elseif ($environment -eq 'AzureUSGovernment') {
         $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=57063'
-    
+
     }
     elseif ($environment -eq 'AzureGermanCloud') {
         $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=57064'
-    
+
     }
     elseif ($environment -eq 'AzureChinaCloud') {
         $url = 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=57062'
-    
+
     }
     else {
         throw "Invaild Environment $environment. Please use -Environment or ensure that you are logged in with Connect-AzAccount."
     }
-    
+
     Write-Progress "Loading $environment..."
-    
+
     # find the link for file
     $pageHTML = Invoke-WebRequest $url -UseBasicParsing
     $fileLink = ($pageHTML.Links | Where-Object { $_.outerHTML -like "*click here to download manually*" }).href
-    
+
     # extract the filename
     $pathParts = $fileLink.Split('/')
     $dirPath = ''
@@ -311,10 +311,10 @@ if ($UseAPI) {
         $dirPath = $env:TEMP + '/'
     }
     $serviceTagFilename = $dirPath + $pathParts[$pathParts.count - 1]
-    
+
     # download the JSON file to the TEMP directory
     $null = Invoke-WebRequest $fileLink -PassThru -OutFile $serviceTagFilename
-    $serviceTags = Get-Content -Raw -Path $serviceTagFilename | ConvertFrom-Json    
+    $serviceTags = Get-Content -Raw -Path $serviceTagFilename | ConvertFrom-Json
 }
 
 
@@ -323,15 +323,15 @@ foreach ($service in $serviceTags.values) {
     Write-Progress -Activity "Searching for $ipAddress" -Status "Checking $($service.Name)..."
     foreach ($addressPrefix in $service.properties.addressPrefixes) {
         if ($(IsIpAddressInCIDR -IPAddress $ipaddress -CIDRAddress $addressPrefix)) {
-            Write-Output "name          : $($service.name)"
-            Write-Output "service       : $($service.properties.systemService)"
-            Write-Output "region        : $($service.properties.region)"
-            Write-Output "addressPrefix : $($addressPrefix)"
-            Write-Output ""
-
+            [PSCustomObject]@{
+                Name = $($service.name)
+                Service = $($service.properties.systemService)
+                Region = $($service.properties.region)
+                AddressPrefix = $($addressPrefix)
+            }
             $found++
         }
     }
 }
 
-Write-Output "$found entries found in $Environment"
+Write-Host "$found entries found in $Environment"
