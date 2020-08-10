@@ -43,15 +43,16 @@ This parameter sets the waiting period for connections before the attempt is con
 [CmdletBinding()]
 
 Param(
-    [Parameter(Mandatory = $false)]
-    [Alias("IpAddress")]
+
+    [Parameter(ParameterSetName = 'IpAddress', ValueFromPipeline, ValueFromPipelineByPropertyName)]
+    [Alias("IpAddress", "AddressPrefixes", "AddressPrefix")]
     [string[]] $IpAddresses,
 
     [Parameter(Mandatory = $false)]
     [Alias("Port")]
     [int[]] $Ports,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(ParameterSetNam = 'FilePath', Mandatory = $false)]
     [string] $FilePath,
 
     [Parameter(Mandatory = $false)]
@@ -64,6 +65,9 @@ Param(
     [switch] $Continuous,
 
     [Parameter(Mandatory = $false)]
+    [switch] $OnlyShowPassed,
+
+    [Parameter(Mandatory = $false)]
     [switch] $OnlyShowFailed,
 
     [Parameter(Mandatory = $false)]
@@ -72,7 +76,6 @@ Param(
     [Parameter(Mandatory = $false)]
     [int] $TimeOut = 500
 )
-
 
 Set-StrictMode -Version Latest
 
@@ -217,7 +220,7 @@ Function Get-IPv4NetworkInfo {
     # $IPAddressInt        = [System.BitConverter]::ToUInt32($IPAddressBytes,0)
 
     #Calculate the number of hosts in our subnet, subtracting one to account for network address.
-    $NumberOfHosts = ($BroadcastAddressInt - $NetworkAddressInt) - 1        
+    $NumberOfHosts = ($BroadcastAddressInt - $NetworkAddressInt) - 1
 
     #Calculate the max and min usable host IPs.
     if ($NumberOfHosts -gt 1) {
@@ -346,7 +349,7 @@ Function ParseIpAddressRange {
         [Parameter(Mandatory = $true)]
         [string] $IpAddressRange
     )
- 
+
     if ($IpAddressRange -like '*-*') {
         $ipRange = $IpAddressRange.Split('-')
 
@@ -380,7 +383,7 @@ $testCases = @()
 
 # validate parameters
 if (-not $Ports) {
-    $Ports = @(80,443)
+    $Ports = @(80, 443)
 }
 
 if (-not ($FilePath -or $IpAddresses)) {
@@ -389,7 +392,12 @@ if (-not ($FilePath -or $IpAddresses)) {
 }
 
 if ($OutputPath -and $Continuous) {
-    Write-Error '-Continuous and -OutputPath can not be used together, please remove one and try again.'
+    Write-Error '-Continuous and -OutputPath can not be used together, Please remove one and try again.'
+    return
+}
+
+if ($OnlyShowPassed -and $OnlyShowFailed) {
+    Write-Error '-OnlyShowPassed and -OnlyShowFailed cannot be used togetehr. Please remove one and try again.'
     return
 }
 
@@ -518,11 +526,14 @@ do {
     if ($OnlyShowFailed) {
         $report = $report | Where-Object { $_.Status -eq 'FAILED' }
     }
+    elseif ($OnlyShowPassed) {
+        $report = $report | Where-Object { $_.Status -eq 'OK' }
+    }
 
     # display on screen
     if ($Continuous) {
         Clear-Host
-        Write-Output "Current Time: $(Get-Date -UFormat '%Y-%m-%d %H:%M:%S')"
+        Write-Host "Current Time: $(Get-Date -UFormat '%Y-%m-%d %H:%M:%S')"
     }
 
     $report | Format-Table
