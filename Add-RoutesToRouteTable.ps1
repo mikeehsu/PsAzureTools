@@ -3,22 +3,22 @@
 Add routes to a route table.
 
 .PARAMETER ResourceGroupName
-This parameter specifies the Resource Group of the Route Table to update
+Specifies the Resource Group that the route table belongs to.
 
 .PARAMETER RouteTableName
-This parameter specifies the name of the Route Table to update 
+Specifies the name of the route table to update .
 
 .PARAMETER Addresses
-List of AddressPrefix
+Specifies the AddressPrefixes to add to the route table. This list can be in the form of an array of AddressPrefix or an array of objects containing an AddressPrefix property, making it useful for piping in AddressSpace or Subnet arrays from a Virtual Network object.
 
 .PARAMETER NextHopType
-The NextHopType to set for the new routes
+Specifies the NextHopType to set for the new routes.
 
 .PARAMETER NextHopIpAddress
-The NextHopIpAddress to set for the new routes
+Specifies the NextHopIpAddress to set for the new routes.
 
 .PARAMETER Force
-If this parameter is specified, the Route Table will be updated without confirmation. 
+If this parameter is specified, the Route Table will be updated without confirmation.
 
 .EXAMPLE
 Add-RoutesToRouteTable.ps1 -ResourceGroupName myRg -RouteTableName myRouteTable -Addresses @('10.1.0.0/24', '10.1.1.0/24') -NextHopType VirtualAppliance -NextHopIpAddress '10.3.0.1'
@@ -33,7 +33,7 @@ Add-RoutesToRouteTable.ps1 -ResourceGroupName myRg -RouteTableName myRouteTable 
 
 #>
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess)]
 
 Param (
     [Parameter(Mandatory)]
@@ -52,10 +52,7 @@ Param (
     [string] $NextHopType,
 
     [Parameter()]
-    [ipaddress] $NextHopIpAddress,
-
-    [Parameter()]
-    [switch] $Force
+    [ipaddress] $NextHopIpAddress
 )
 
 
@@ -97,13 +94,14 @@ BEGIN {
 
 PROCESS {
 
+    # Set-StrictMode -Version 3
+
     ############################################################
     function NewRoutes {
         param (
-            $Address,
-            $existingRoutes
+            $Address
         )
-    
+
         $routes = @()
 
         if ($Address.Name) {
@@ -112,11 +110,11 @@ PROCESS {
 
         # allows for passing in a Subnet object or AddressSpace object
         $addressPrefixes = @()
-        if ($Address.AddressPrefix) {
+        if  ($address.AddressPrefix) {
             $addressPrefixes += $address.AddressPrefix
         }
 
-        if ($Addresses.AddressPrefixes) {
+        if  ($address.AddressPrefixes) {
             $addressPrefixes += $address.AddressPrefixes
         }
 
@@ -134,13 +132,15 @@ PROCESS {
     ############################################################
 
     # determine type of array passed in
-    if ($Addresses.GetType().name -eq 'String') {
+    if ($Addresses -is [string]) {
+        # passed in a single string (not an array)
         $newRoutes += [PSCustomObject] @{
             Name          = $Addresses.Replace('/', '_') + '-route'
             AddressPrefix = $Addresses
         }
     }
-    elseif ($Addresses.GetType().Name -eq 'Object[]' -and $Addresses[0].GetType().Name -eq 'String') {
+    elseif ($Addresses -is [array] -and $Addresses[0] -is [string]) {
+        # passed in a array of strings
         foreach ($addressPrefix in $Addresses) {
             $newRoutes += [PSCustomObject] @{
                 Name          = $addressPrefix.Replace('/', '_') + '-route'
@@ -148,11 +148,13 @@ PROCESS {
             }
         }
     }
-    elseif ($Addresses.GetType().Name -eq 'Object[]' -and $Addresses.Count -eq 1) {
+    elseif ($Addresses -is [object]) {
+        # passed in a single object (pipeline passes in a single object at a time)
         $newRoutes += NewRoutes -Address $Addresses
 
     }
-    elseif ($Addresses.GetType().Name -eq 'Object[]' -and $Addresses.Count -gt 1) {
+    elseif ($Addresses -is [array] -and $Addresses[0] -is [object]) {
+        # passed in an array of objects
         foreach ($address in $Addresses) {
             $newRoutes += NewRoutes -Address $address
         }
@@ -165,12 +167,12 @@ PROCESS {
 }
 
 END {
-    $existingRoutes = $routeTable.Routes.AddressPrefix
-    $newRoutes = $newRoutes | Where-Object {$existingRoutes -notcontains $_.AddressPrefix}
-    
+    # filter out existing routes
+    $newRoutes = $newRoutes | Where-Object {$routeTable.Routes.AddressPrefix -notcontains $_.AddressPrefix}
+
     # no new routes
-    if ($newRoutes.count -eq 0) {
-        Write-Host "No new routes to add."
+    if (-not $newRoutes -or $newRoutes.count -eq 0) {
+        Write-Verbose "No new routes to add."
         return
     }
 
@@ -182,26 +184,21 @@ END {
         }
     }
 
-
     # confirm addition of routes
-    if (-not $Force) {
-        Write-Host "The following routes will be added (NextRouteType:$NextHopType, NextRouteIPAddress:$NextHopIpAddress):"
-        foreach ($newRoute in $newRoutes) {
-            Write-Host "`t$($newRoute.Name) - $($newRoute.AddressPrefix)"
-        }
-        $confirmation = Read-Host "Add these routes? (Y/N)"
-        if ($confirmation.ToUpper() -ne 'Y') {
-            Write-Host 'Command Aborted.'
-            return
+    $i = 0;
+    foreach ($newRoute in $newRoutes) {
+        if ($PSCmdlet.ShouldProcess($RouteTableName, "Add route $($newRoute.Name) with $($newRoute.AddressPrefix), $NextHopType, $NextHopIpAddress")) {
+            $result = $routeTable | Add-AzRouteConfig -Name $newRoute.Name -AddressPrefix $newRoute.AddressPrefix -NextHopType $NextHopType -NextHopIpAddress $NextHopIpAddress
+            $i++
         }
     }
 
-    $i = 0;
-    foreach ($newRoute in $newRoutes) {
-        $result = $routeTable | Add-AzRouteConfig -Name $newRoute.Name -AddressPrefix $newRoute.AddressPrefix -NextHopType $NextHopType -NextHopIpAddress $NextHopIpAddress
-        $i++ 
+    # check for anything to do
+    if ($i -eq 0) {
+        Write-Verbose "No new routes added."
+        return
     }
 
     $result = $routeTable | Set-AzRouteTable
-    Write-Host "$($routeTable.ResourceGroupName)/$($routeTable.Name) updated. $i new routes added."
+    Write-Verbose "$($routeTable.ResourceGroupName)/$($routeTable.Name) - $i new route(s) added."
 }
