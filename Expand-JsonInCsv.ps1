@@ -21,13 +21,13 @@ Delimiter to separate the property values in CSV strings.
 Number of rows to skip in the initial CSV file.
 
 .PARAMETER SampleSize
-Number of rows to sample for data in the JSON. This is used to create the column headings for the JSON elements
+Number of rows to sample for data in the JSON. This is used to create the column headings for the JSON elements. Default is 100.
 
 .PARAMETER BatchSize
 Number of rows to cache before writing data to the output file
 
 .EXAMPLE
-Expand-CSVJSON.ps1 -FilePath MyCsvFile.txt -OutputPath MyExpanded.csv -Delimiter "`t" -Expand 'Tags'
+Expand-JsonInCsv.ps1 -FilePath MyCsvFile.txt -OutputPath MyExpanded.csv -Delimiter "`t" -Expand 'Tags'
 #>
 
 
