@@ -27,7 +27,10 @@ Param (
     [switch] $ShowDetails,
 
     [Parameter()]
-    [switch] $ShowIneligible,
+    [switch] $ShowIneligibleVms,
+
+    [Parameter()]
+    [switch] $ShowIneligibleDisks,
 
     [Parameter()]
     [string] $Delimiter = ','
@@ -172,15 +175,11 @@ ForEach-Object {
             $vm.CPU = $additionalInfo.VCPUs
 
             if ($familySize) {
-                $familyInfo = $familySize[$vm.Size]
+                $familyInfo = $familySize[$vm.Size.Replace('_Promo','')] # -- must account for _PROMO SKUs
                 if ($familyInfo) {
                     $vm.Family = $familyInfo.InstanceSizeFlexibilityGroup
                     $vm.FamilyRatio = $familyInfo.Ratio
                 }
-                else {
-                    Write-Verbose "$($vm.Size) undefined in Reservation Family"
-                }
-
             }
             else {
                 $vm.Family = $row.'Meter Sub-Category'
@@ -289,7 +288,7 @@ $ineligibleVms = $vms.Values
     }
 }
 
-if ($ShowIneligible) {
+if ($ShowIneligibleVms) {
     Write-Output "Ineligible Virtual Machine Details"
     $ineligibleVms | Format-Table
 }
@@ -345,7 +344,7 @@ $ineligibleDisks = $disks.Values
     }
 }
 
-if ($ShowIneligible) {
+if ($ShowIneligibleDisks) {
     Write-Output "Ineligible Disks Details"
     $ineligibleDisks | Format-Table
 }
