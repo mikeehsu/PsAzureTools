@@ -9,8 +9,12 @@ Source path for the Azure Billing CSV file
 .PARAMETER ShowDetails
 Show the details behind the reservation recommendations
 
-.PARAMETER ShowIneligible
-Show details for the resources that were not recommended for reservations
+.PARAMETER ShowIneligibleVms
+Show details for the virtual machines that were not recommended for reservation
+
+.PARAMETER ShowIneligibleDisks
+Show details for the disks that were not recommended for reservation
+
 
 .PARAMETER Delimiter
 Delimiter to use for the Azure Billing CSV File. Default to ','
@@ -33,6 +37,9 @@ Param (
     [switch] $ShowIneligibleDisks,
 
     [Parameter()]
+    [string] $ExcelPath,
+
+    [Parameter()]
     [string] $Delimiter = ','
 )
 
@@ -43,7 +50,17 @@ $VmUtilizationThreshold = 0.5
 $FamilyURL = 'https://isfratio.blob.core.windows.net/isfratio/ISFRatio.csv'
 $eligibleDisks = @('P30', 'P40', 'P50', 'P60', 'P70', 'P80')
 
+# check for installed modules
+if ($ExcelPath)
+{
+    if (Get-Module -ListAvailable -Name ImportExcel) {
+        Import-Module ImportExcel
+    } else {
+        Write-Host "To use -ExcelPath, you must have ImportExcel installed. Please use Install-Module ImportExcel to download and install module"
+    }
+}
 
+#region -- define structures for resources
 Class ReserveVm {
     [string] $ResourceGroup
     [string] $Name
@@ -68,7 +85,7 @@ Class ReserveDisk {
     [float] $Usage = 0
     [float] $Cost
 }
-
+#endregion
 
 #region -- Get rowcount of file
 # get line count using streamreader, much faster than Get-Content for large files
@@ -296,15 +313,15 @@ if ($ShowIneligibleVms) {
 # group by Family
 Write-Output "Family Size Virtual Machine Summary"
 $familySummary = $reservationVms
-| Group-Object Family, Location
+| Group-Object Location, Family
 | ForEach-Object {
-    $Family, $Location = ($_.Name -split ',').Trim()
+    $Location, $Family = ($_.Name -split ',').Trim()
     $Count = $_.Count
     $FamilyRatio, $CPU, $Cost = ($_.Group | Measure-Object -Property FamilyRatio, CPU, Cost -Sum ).Sum
 
     [PSCustomObject] @{
-        Family      = $Family
         Location    = $Location
+        Family      = $Family
         Count       = $Count
         FamilyRatio = $FamilyRatio
         CPU         = $CPU
@@ -350,14 +367,16 @@ if ($ShowIneligibleDisks) {
 }
 
 # disk summary
-$diskSummary = @()
-$reservationDisks | Group-Object Size | ForEach-Object {
-    $DiskSize = $_.Name
+$diskSummary = $reservationDisks
+| Group-Object Location,Size
+| ForEach-Object {
+    $Location, $Size = ($_.Name -split ',').Trim()
     $Count = $_.Count
     $Cost = ($_.Group | Measure-Object -Property Cost -Sum ).Sum
 
-    $diskSummary += [PSCustomObject] @{
-        DiskSize = $DiskSize
+    [PSCustomObject] @{
+        Location = $Location
+        Size     = $Size
         Count    = $Count
         Cost     = $Cost
     }
@@ -369,7 +388,7 @@ $diskSummary | Format-Table
 
 $totalDays = ([DateTime] $endDate - [DateTime] $beginDate).TotalDays + 1
 
-Write-Output ("Date Range: {0:M/dd/yyyy}  thru {1:M/dd/yyyy}" -f $beginDate, $endDate)
+Write-Output ("Date Range: {0:M/dd/yyyy} thru {1:M/dd/yyyy}" -f $beginDate, $endDate)
 Write-Output "# of Days: $totalDays"
 Write-Output ""
 Write-Output "# of Virtual Machines identified: $($vms.Count)"
@@ -379,3 +398,19 @@ Write-Output ""
 Write-Output "# of Disks identified: $($disks.Count)"
 Write-Output "# of Disks recommended: $($reservationDisks.Count)"
 Write-Output "# of Disks Ineligible: $($ineligibleDisks.Count)"
+
+if ($ExcelPath) {
+    Remove-Item $ExcelPath
+
+    # export Vm data
+    $ptDef = New-PivotTableDefinition -Activate -PivotTableName 'Vm-Family-Summary' `
+        -PivotRows 'Location','Family','Size','Name' -PivotData @{Name='Count'; FamilyRatio='Sum'; CPU='Sum'; Cost='Sum'} -PivotDataToColumn
+    $reservationVms | Sort-Object -Property Family,Size,Name | Export-Excel $ExcelPath -WorkSheet 'Vm-Reservations' -AutoSize -AutoFilter -PivotTableDefinition $ptDef
+    $ineligibleVms | Export-Excel $ExcelPath -WorksheetName 'Vm-Ineligible' -AutoSize -AutoFilter
+
+    # export disks data
+    $ptDef = New-PivotTableDefinition -Activate -PivotTableName 'Disk-Size-Summary' `
+        -PivotRows 'Location','Size','Name' -PivotData @{Name='Count'; Cost='Sum'} -PivotDataToColumn
+    $reservationDisks | Sort-Object -Property Location,Size,Name | Export-Excel $ExcelPath -WorksheetName 'Disk-Reservations' -AutoSize -AutoFilter -PivotTableDefinition $ptDef
+    $ineligibleDisks | Export-Excel $ExcelPath -WorksheetName 'Disk-Ineligible' -AutoSize -AutoFilter
+}
