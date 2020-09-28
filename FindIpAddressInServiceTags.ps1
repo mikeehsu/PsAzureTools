@@ -322,6 +322,10 @@ $found = 0
 foreach ($service in $serviceTags.values) {
     Write-Progress -Activity "Searching for $ipAddress" -Status "Checking $($service.Name)..."
     foreach ($addressPrefix in $service.properties.addressPrefixes) {
+        # skip any IPv6 addresses
+        if ($addressPrefix.Contains(':')) {
+            continue
+        }
         if ($(IsIpAddressInCIDR -IPAddress $ipaddress -CIDRAddress $addressPrefix)) {
             [PSCustomObject]@{
                 Name = $($service.name)
