@@ -413,7 +413,7 @@ if ($ExcelPath) {
     # export Vm data
     $ptDef = New-PivotTableDefinition -Activate -PivotTableName 'Vm-Family-Summary' `
         -PivotRows 'Location','Family','Size' -PivotData @{Name='Count'; FamilyRatio='Sum'; CPU='Sum'; Cost='Sum'} -PivotDataToColumn
-    $reservationVms | Sort-Object -Property Family,Size,Name | Export-Excel $ExcelPath -WorkSheet 'Vm-Reservations' -AutoSize -AutoFilter -PivotTableDefinition $ptDef -Numberformat 'Currency'
+    $reservationVms | Sort-Object -Property Family,Size,Name | Export-Excel $ExcelPath -WorkSheet 'Vm-Reservations' -AutoSize -AutoFilter -PivotTableDefinition $ptDef
     $ineligibleVms | Export-Excel $ExcelPath -WorksheetName 'Vm-Ineligible' -AutoSize -AutoFilter
 
     # export disks data
