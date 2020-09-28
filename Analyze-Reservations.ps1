@@ -1,7 +1,9 @@
 <#
 .SYNOPSIS
+Analyze an Azure bill and show potential reservations
 
 .DESCRIPTION
+Analyze an Azure detailed usage bill and show VMs which are fully utilized (within a certain threshold) and disks which are of an eligible size.
 
 .PARAMETER FilePath
 Source path for the Azure Billing CSV file
@@ -15,12 +17,14 @@ Show details for the virtual machines that were not recommended for reservation
 .PARAMETER ShowIneligibleDisks
 Show details for the disks that were not recommended for reservation
 
+.PARAMETER VmUtilizationThreshold
+Only show Virtual Machines that pass a certain utilization threshold. Default is 0.6
 
 .PARAMETER Delimiter
 Delimiter to use for the Azure Billing CSV File. Default to ','
 
 .EXAMPLE
-Analyze-Reservations.ps1 -FilePath MyAzureBill.csv -ShowDetails
+Analyze-Reservations.ps1 -FilePath MyAzureBill.csv -ShowDetails -ExcelPath MyExcelResults.xlsx
 #>
 
 Param (
@@ -40,13 +44,15 @@ Param (
     [string] $ExcelPath,
 
     [Parameter()]
+    [decimal] $VmUtilizationThreshold = 0.6,
+
+    [Parameter()]
     [string] $Delimiter = ','
 )
 
 Set-StrictMode -Version 3
 
 $BatchSize = 1000
-$VmUtilizationThreshold = 0.5
 $FamilyURL = 'https://isfratio.blob.core.windows.net/isfratio/ISFRatio.csv'
 $eligibleDisks = @('P30', 'P40', 'P50', 'P60', 'P70', 'P80')
 
@@ -71,9 +77,9 @@ Class ReserveVm {
     [int] $FamilyRatio
     [string] $Size
     [int] $CPU
-    [float] $Usage = 0
-    [float] $Cost = 0
-    [float] $Utilization = 0
+    [decimal] $Usage = 0
+    [decimal] $Cost = 0
+    [decimal] $Utilization = 0
     [bool] $ReserveWorthy = $false
 }
 
@@ -82,8 +88,8 @@ Class ReserveDisk {
     [string] $Name
     [string] $Location
     [string] $Size
-    [float] $Usage = 0
-    [float] $Cost
+    [decimal] $Usage = 0
+    [decimal] $Cost
 }
 #endregion
 
@@ -400,17 +406,19 @@ Write-Output "# of Disks recommended: $($reservationDisks.Count)"
 Write-Output "# of Disks Ineligible: $($ineligibleDisks.Count)"
 
 if ($ExcelPath) {
-    Remove-Item $ExcelPath
+    if (Test-Path $ExcelPath) {
+        Remove-Item $ExcelPath
+    }
 
     # export Vm data
     $ptDef = New-PivotTableDefinition -Activate -PivotTableName 'Vm-Family-Summary' `
-        -PivotRows 'Location','Family','Size','Name' -PivotData @{Name='Count'; FamilyRatio='Sum'; CPU='Sum'; Cost='Sum'} -PivotDataToColumn
-    $reservationVms | Sort-Object -Property Family,Size,Name | Export-Excel $ExcelPath -WorkSheet 'Vm-Reservations' -AutoSize -AutoFilter -PivotTableDefinition $ptDef
+        -PivotRows 'Location','Family','Size' -PivotData @{Name='Count'; FamilyRatio='Sum'; CPU='Sum'; Cost='Sum'} -PivotDataToColumn
+    $reservationVms | Sort-Object -Property Family,Size,Name | Export-Excel $ExcelPath -WorkSheet 'Vm-Reservations' -AutoSize -AutoFilter -PivotTableDefinition $ptDef -Numberformat 'Currency'
     $ineligibleVms | Export-Excel $ExcelPath -WorksheetName 'Vm-Ineligible' -AutoSize -AutoFilter
 
     # export disks data
     $ptDef = New-PivotTableDefinition -Activate -PivotTableName 'Disk-Size-Summary' `
-        -PivotRows 'Location','Size','Name' -PivotData @{Name='Count'; Cost='Sum'} -PivotDataToColumn
+        -PivotRows 'Location','Size' -PivotData @{Name='Count'; Cost='Sum'} -PivotDataToColumn
     $reservationDisks | Sort-Object -Property Location,Size,Name | Export-Excel $ExcelPath -WorksheetName 'Disk-Reservations' -AutoSize -AutoFilter -PivotTableDefinition $ptDef
     $ineligibleDisks | Export-Excel $ExcelPath -WorksheetName 'Disk-Ineligible' -AutoSize -AutoFilter
 }
