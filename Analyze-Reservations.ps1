@@ -338,7 +338,7 @@ $familySummary | Format-Table
 
 # disk reservations
 $reservationDisks = $disks.Values
-| Where-Object { $eligibleDisks -contains $_.Size }
+| Where-Object { $eligibleDisks -contains $_.Size -and $_.Cost -gt 0}
 | ForEach-Object { [PSCustomObject] @{
         ResourceGroup = $_.ResourceGroup
         Name          = $_.Name
@@ -356,7 +356,7 @@ if ($ShowDetails) {
 
 # ineligile disks
 $ineligibleDisks = $disks.Values
-| Where-Object { $eligibleDisks -notcontains $_.Size }
+| Where-Object { $eligibleDisks -notcontains $_.Size -or $_.Cost -eq 0}
 | ForEach-Object { [PSCustomObject] @{
         ResourceGroup = $_.ResourceGroup
         Name          = $_.Name
