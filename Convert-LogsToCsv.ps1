@@ -1,16 +1,16 @@
 [CmdletBinding()]
 param (
-    [Parameter()]
+    [Parameter(Mandatory)]
     [string] $ResourceGroupName,
 
-    [Parameter()]
+    [Parameter(Mandatory)]
     [Alias('Name')]
     [string] $StorageAccountName,
 
-    [Parameter()]
+    [Parameter(Mandatory)]
     [string] $ContainerName,
 
-    [Parameter()]
+    [Parameter(Mandatory)]
     [string] $OutputPath,
 
     [Parameter()]
