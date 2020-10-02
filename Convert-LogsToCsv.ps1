@@ -17,9 +17,43 @@ param (
     [datetime] $BeginDate,
 
     [Parameter()]
-    [datetime] $EndDate
+    [datetime] $EndDate,
+
+    [Parameter()]
+    [array] $Property
 )
 
+############################################################
+function ExpandObject {
+
+    [CmdletBinding()]
+
+    Param (
+        [Parameter(Mandatory, ValueFromPipeline)]
+        $InputObject,
+
+        [Parameter(Mandatory)]
+        [array] $Property
+    )
+
+    BEGIN {
+        $cmd = '[PsCustomObject] @{ '
+        foreach ($item in $Property) {
+            $cmd += "`'$item`' = `$InputObject.$item; "
+        }
+        $cmd += '}'
+    }
+
+    PROCESS {
+        Invoke-Expression $cmd
+    }
+
+    END {
+    }
+}
+
+############################################################
+# main
 $BatchSize = 1000
 
 # confirm user is logged into subscription
@@ -46,11 +80,13 @@ if ($blobs.Name -match '[0-9]{4}-[0-9]{2}-[0-9]{2}') {
     $dateRegExp = '[0-9]{4}-[0-9]{2}-[0-9]{2}'
     $dateFormat = '{0:d4}-{1:d2}-{2:d2}'
 
-} elseif ($blobs.Name -match '\/y\=[0-9]{4}\/m\=[0-9]{2}\/d\=[0-9]{2}') {
+}
+elseif ($blobs.Name -match '\/y\=[0-9]{4}\/m\=[0-9]{2}\/d\=[0-9]{2}') {
     $dateRegExp = '\/y\=[0-9]{4}\/m\=[0-9]{2}\/d\=[0-9]{2}\/'
     $dateFormat = '/y={0:d4}/m={1:d2}/d={2:d2}/'
 
-} else {
+}
+else {
     Write-Host 'Date format not supported.'
     return
 }
@@ -59,11 +95,11 @@ if ($blobs.Name -match '[0-9]{4}-[0-9]{2}-[0-9]{2}') {
 $beginStr = $null
 $endStr = $null
 if ($BeginDate) {
-    $beginStr = $dateFormat -f $BeginDate.Year,$BeginDate.Month,$BeginDate.Day
+    $beginStr = $dateFormat -f $BeginDate.Year, $BeginDate.Month, $BeginDate.Day
 }
 
 if ($EndDate) {
-    $endStr = $dateFormat -f $EndDate.Year,$EndDate.Month,$EndDate.Day
+    $endStr = $dateFormat -f $EndDate.Year, $EndDate.Month, $EndDate.Day
 }
 
 # delete any existing output file
@@ -78,7 +114,7 @@ $outputCache = @()
 # loop through files that match date range
 
 Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Verbose:$false
-| Where-Object {$_.Name -match $dateRegExp}
+| Where-Object { $_.Name -match $dateRegExp }
 | ForEach-Object {
     $datePortion = $matches[0]
     $blob = $_
@@ -93,38 +129,17 @@ Get-AzStorageBlob -Context $storageAccount.Context -Container $ContainerName -Ve
         | ForEach-Object {
             $data = $_
 
-            $result =  [PSCustomObject] @{
-                time = $data.time
-                resourceId = $data.resourceId
-                operationName = $data.operationName
-                category = $data.category
-                tenantId = $data.tenantId
-                resultType = $data.resultType
-                resultDescription = $data.resultDescription
-                durationMs = $data.durationMs
-                callerIpAddress = $data.callerIpAddress
-                identity = $data.identity
-                createdDateTime = $data.properties.createdDateTime
-                userDisplayName = $data.properties.userDisplayName
-                userPrincipalName = $data.properties.userPrincipalName
-                userId = $data.properties.userId
-                appId = $data.properties.appId
-                appDisplayName = $data.properties.appDisplayName
-                errorCode = $data.properties.status.errorcode
-                additionalDetails = $data.properties.status.additionalDetails
-                city = $data.properties.location.city
-                state = $data.properties.location.state
-                countryOrRegion = $data.properties.location.countryOrRegion
-                mfaAuthMethod = $data.properties.mfaDetail.authMethod
-                tokenIssuerType = $data.properties.tokenIssuerType
-                resourceDisplayName = $data.properties.resourceDisplayName
-                alternateSignInName = $data.properties.alternateSignInName
+            if ($Property) {
+                $result = $data | ExpandObject -Property $Property
+            } else {
+                $result = $data
             }
 
             $rowCount++
             if ($rowCount -eq 1) {
                 $outputCache += $result | ConvertTo-Csv
-            } else {
+            }
+            else {
                 $outputCache += ($result | ConvertTo-Csv)[1]
             }
         }
