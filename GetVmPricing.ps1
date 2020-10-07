@@ -85,7 +85,7 @@ class VmPrice {
     [string] $payg
     [string] $ri1year
     [string] $ri3year
-    [string] $ahub
+#    [string] $ahub
 }
 
 $vms = @()
@@ -136,10 +136,10 @@ for ($t = 0; $t -lt $tables.Length - 2; $t++) {
         $vm.vcpu = $($row.cells[2].innerHTML.Replace('/', '|') | Select-String -Pattern "^[^<]+" | % { $_.Matches } | % { $_.Value }).trim()
         $vm.memory = $row.cells[3].innerHTML
         $vm.storage = $row.cells[4].innerHTML
-        $vm.payg = IsNull ([float] $($row.cells[5].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
-        $vm.ri1year = IsNull ([float] $($row.cells[6].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
-        $vm.ri3year = IsNull ([float] $($row.cells[7].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
-        $vm.ahub = IsNull ([float] $($row.cells[8].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
+        $vm.payg = IsNull ([float] $($row.cells[6].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
+        $vm.ri1year = IsNull ([float] $($row.cells[8].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
+        $vm.ri3year = IsNull ([float] $($row.cells[10].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
+#        $vm.ahub = IsNull ([float] $($row.cells[8].innerHTML | Select-String -Pattern $locationPricePattern | % { $_.Matches } | % { $_.Value }) * $factor) ''
 
         # skip any invalid data (looking for valid vcpu content)
         if ($vm.vcpu -notmatch "^[\d\s\/\|+]+$") {
