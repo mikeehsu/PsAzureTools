@@ -30,24 +30,25 @@ Because a new VM is created, you should check the diagnostic storage account ass
 #>
 
 Param (
-    [Parameter(Mandatory)]
+    [Parameter(ParameterSetName='Vm', Mandatory)]
     [string] $ResourceGroupName,
 
-    [Parameter(Mandatory)]
+    [Parameter(ParameterSetName='Vm', Mandatory)]
+    [Alias('Name')]
     [string] $VmName,
 
+    [Parameter(ParameterSetName='Vm')]
     [Parameter(ParameterSetName='AvSetName', Mandatory)]
-    [Parameter(ParameterSetName='RemoveAvSet')]
     [string] $AvailabilitySetName,
 
-    [Parameter(ParameterSetName='AvSetName')]
-    [Parameter(ParameterSetName='RemoveAvSet', Mandatory)]
+    [Parameter(ParameterSetName='Vm')]
+    [Parameter(ParameterSetName='RemoveAvSet')]
     [switch] $RemoveAvailabilitySet,
 
-    [Parameter(ParameterSetName='AvSetName')]
-    [Parameter(ParameterSetName='RemoveAvSet')]
-    [Parameter(ParameterSetName='VmSize', Mandatory)]
-    [string] $VmSize
+    [string] $VmSize,
+
+    [ValidateSet(1,2,3)]
+    [int] $Zone
 )
 
 ############################################################
@@ -85,7 +86,6 @@ if ($AvailabilitySetName -and $RemoveAvailabilitySet) {
     return
 }
 
-
 if ($AvailabilitySetName) {
     Write-Progress -Activity "Moving VM..." -Status "checking information VM $($AvailabilitySetName)"
     $availabilitySet = Get-AzAvailabilitySet -ResourceGroupName $ResourceGroupName -AvailabilitySetName $AvailabilitySetName
@@ -97,23 +97,46 @@ if ($AvailabilitySetName) {
 }
 #endregion
 
-#region -- update VmSize
-if ($VmSize) {
-    $size = Get-AzVMSize -Location $sourceVm.Location | Where-Object {$_.Name -eq $VmSize}
+#region -- update VmSize & zone
+if (-not $VmSize) {
+    $VmSize = $sourceVm.HardwareProfile.VmSize
+}
+
+if (-not $Zone) {
+    $Zone = $sourceVm.Zones
+}
+
+if ($VmSize -ne $sourceVm.HardwareProfile.VmSize -or $Zone -ne $sourceVm.Zones) {
+    Write-Progress -Activity "Moving VM..." -Status "checking for $VmSize in destination"
+
+    # check to make sure Vm SKU is available in region
+    $size = Get-AzComputeResourceSku | Where-Object {$_.ResourceType -eq 'VirtualMachines' -and $_.Name -eq $VmSize -and $_.Locations -contains $sourceVm.Location}
     if (-not $size) {
         Write-Error "VmSize $VmSize is not available in $($sourceVm.Location)"
         return
     }
 
-    if ($VmSize -ne $sourceVm.HardwareProfile.VmSize) {
-        $actionsTaken = "Resized to $VmSize"
+    # check to make sure Vm SKU is available in a zone
+    $size = $size | Where-Object {$_.LocationInfo.Zones -contains $Zone}
+    if (-not $size) {
+        Write-Error "VmSize $VmSize is not available in zone $Zone"
+        return
     }
-} else {
-    $VmSize = $sourceVm.HardwareProfile.VmSize
+
+    # determine actions taken
+    if ($VmSize -ne $sourceVm.HardwareProfile.VmSize) {
+        $actionsTaken += "Resized to $VmSize"
+    }
+
+    if ($Zone -ne $sourceVm.Zones) {
+        $actionsTaken += "Moved to Zone $Zone"
+    }
 }
 #endregion
 
 #region -- Copy VM settings
+Write-Progress -Activity "Moving VM..." -Status "configuring destination $($sourceVm.Name)"
+
 $params = @{
     VmName = $sourceVm.Name
     VmSize = $VmSize
@@ -124,10 +147,6 @@ if ($sourceVm.LicenseType) {
     $params += @{ LicenseType = $sourceVm.LicenseType }
 }
 
-if ($sourceVm.Zones) {
-    $params += @{ Zone = $sourceVm.Zones}
-}
-
 if ($sourceVm.ProximityPlacementGroup) {
     $params += @{ ProximityPlacementGroupId = $sourceVm.ProximityPlacementGroup.Id}
 }
@@ -136,9 +155,14 @@ if ($sourceVm.Tags) {
     $params += @{ Tags = $sourceVm.Tags}
 }
 
-#region -- update AvailabilitySet
+
+# set the zone
+if ($Zone) {
+    $params += @{Zone = $Zone}
+}
+
+# update AvailabilitySet
 $origAvsetName = $null
-Write-Progress -Activity "Moving VM..." -Status "configuring destination $($sourceVm.Name)"
 if ($sourceVm.AvailabilitySetReference -and $sourceVm.AvailabilitySetReference.Id -match '[^/]*$') {
     $origAvsetName = $matches[0]
 }
@@ -156,33 +180,13 @@ if ($RemoveAvailabilitySet) {
     }
     $params += @{ AvailabilitySetId = $availabilitySet.Id }
 
-} else {
-    $params += @{ AvailabilitySetId = $sourceVm.AvailabilitySet.Id }
+} elseif ($sourceVm.AvailabilitySetReference) {
+    $params += @{ AvailabilitySetId = $sourceVm.AvailabilitySetReference.Id }
 }
+#endregion
 
+# create the VM config
 $newVm = New-AzVMConfig @params
-#endregion
-
-#region -- Attach all the disks
-# attach OS disk
-$osDiskId = $sourceVm.StorageProfile.OsDisk.ManagedDisk.Id
-
-if ($sourceVm.StorageProfile.OsDisk.OsType -eq 'Windows') {
-    Write-Verbose "setting up new VM OS Disk (Windows)"
-    $result = Set-AzVMOSDisk -VM $newVm -ManagedDiskId $osDiskId -CreateOption Attach -Windows
-} else {
-    Write-Verbose "setting up new VM OS Disk (Linux)"
-    $result = Set-AzVMOSDisk -VM $newVm -ManagedDiskId $osDiskId -CreateOption Attach -Linux
-}
-
-# attach data disks
-Write-Verbose "assigning original Data Disks"
-$i = 0
-foreach ($oldDataDisk in $sourceVm.StorageProfile.DataDisks) {
-    $result = Add-AzVMDataDisk -VM $newVm -ManagedDiskId $oldDataDisk.ManagedDisk.Id -CreateOption Attach -Lun $i
-    $i = $i + 1
-}
-#endregion
 
 #region -- Connect original NICs
 Write-Verbose 'assigning original NIC cards'
@@ -197,9 +201,67 @@ if ($actionsTaken.Count -eq 0) {
     return
 }
 
-
 Write-Progress -Activity "Moving VM..." -Status "removing source VM $($sourceVm.Name)"
 $result = Remove-AzVm -ResourceGroupName $sourceVm.ResourceGroupName -Name $sourceVm.Name -Force -ErrorAction Stop
+
+#region -- if zones, snapdisks & create in zone
+$diskSuffix = $null
+if ($Zone -ne $sourceVm.Zones) {
+    Write-Progress -Activity "Moving VM..." -Status "removing source VM $($sourceVm.Name)"
+
+    $diskSuffix = '_copy'
+
+    $disks = @()
+    $disks += [PSCustomObject]@{
+        Id = $sourceVm.StorageProfile.OsDisk.ManagedDisk.Id
+        StorageType = $sourceVm.StorageProfile.OsDisk.ManagedDisk.StorageAccountType
+    }
+
+    foreach ($dataDisk in $sourceVm.StorageProfile.DataDisks) {
+        $disks += [PSCustomObject]@{
+            Id = $dataDisk.ManagedDisk.Id
+            StorageType = $dataDisk.ManagedDisk.StorageAccountType
+        }
+    }
+
+    $disks | ForEach-Object -parallel {
+        if ($_.Id -match '[^\/]+?$') {
+            $diskName = $matches[0]
+            $snapshotName = $diskName + '_snap'
+            $diskCopyName = $diskname + $diskSuffix
+        } else {
+            throw "Unable to find disk name in Id:$($_.Id)"
+        }
+
+        $snapshotConfig =  New-AzSnapshotConfig -SourceUri $_.Id -Location $sourceVm.Location -CreateOption copy
+        $snapshot = New-AzSnapshot -ResourceGroupName $sourceVm.ResourceGroupName -SnapshotName $snapshotName -Snapshot $snapshotConfig
+
+        $diskConfig = New-AzDiskConfig -SkuName $_.storageType -Location $sourceVm.Location -Zone $zone -CreateOption Copy -SourceResourceId $snapshot.Id
+        $disk = New-AzDisk -Disk $diskConfig -ResourceGroupName $sourceVm.ResourceGroupName -DiskName $diskCopyName
+    }
+}
+#endregion
+
+#region -- Attach all the disks
+# attach OS disk
+$osDiskId = $sourceVm.StorageProfile.OsDisk.ManagedDisk.Id + $diskSuffix
+if ($sourceVm.StorageProfile.OsDisk.OsType -eq 'Windows') {
+    Write-Verbose "setting up new VM OS Disk (Windows)"
+    $result = Set-AzVMOSDisk -VM $newVm -ManagedDiskId $osDiskId -CreateOption Attach -Windows -Caching $sourceVm.StorageProfile.OsDisk.Caching
+} else {
+    Write-Verbose "setting up new VM OS Disk (Linux)"
+    $result = Set-AzVMOSDisk -VM $newVm -ManagedDiskId $osDiskId -CreateOption Attach -Linux -Caching $sourceVm.StorageProfile.OsDisk.Caching
+}
+
+# attach data disks
+Write-Verbose "assigning original Data Disks"
+$i = 0
+foreach ($oldDataDisk in $sourceVm.StorageProfile.DataDisks) {
+    $diskId = $oldDataDisk.ManagedDisk.Id + $diskSuffix
+    $result = Add-AzVMDataDisk -VM $newVm -ManagedDiskId $diskId -CreateOption Attach -Lun $i -Caching $oldDataDisk.Caching
+    $i = $i + 1
+}
+#endregion
 
 try {
     Write-Progress -Activity "Moving VM..." -Status "creating new VM $($newVm.Name)"

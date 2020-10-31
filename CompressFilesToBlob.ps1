@@ -85,7 +85,7 @@ param (
     [ValidateSet('Date', 'Time')]
     [string] $AppendToBlobName,
 
-    [ValidateSet(0,1,2,3,4,5,6,7,8,9)]
+    [ValidateSet(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)]
     [int] $CompressionLevel = 5,
 
     [string] $CompressTempDir = $env:TEMP,
@@ -118,10 +118,8 @@ param (
     [switch] $UseManagedIdentity,
 
     [Parameter(ParameterSetName = "StorageAccount")]
-    [string] $Environment,
+    [string] $Environment
 
-    [Parameter(ParameterSetName = "PartialZip", Mandatory = $true)]
-    [string] $PartialZipPath
 )
 
 #####################################################################
@@ -150,7 +148,8 @@ function IntegrityCheckFull {
 
     if ($script:SplitZipSize) {
         $params += $filePath + '.001'
-    } else {
+    }
+    else {
         $params += $filePath
     }
 
@@ -234,7 +233,8 @@ function IntegrityCheckSimple {
 
     if ($script:SplitZipSize) {
         $params += $filePath + '.001'
-    } else {
+    }
+    else {
         $params += $filePath
     }
 
@@ -328,7 +328,8 @@ function CompressPathToBlob {
     elseif ($script:IntegrityCheck -eq 'Full') {
         $result = IntegrityCheckFull -filePath $archivePath -sourcePath $sourcePath
 
-    } else {
+    }
+    else {
         $result = $false
         Write-Error "-IntegrityCheck $IntegrityCheck invaild. No integrity check performed."
     }
@@ -362,7 +363,8 @@ function CopyFileToContainer {
     if ($SplitZipSize) {
         $filePath = $filePath + '.*'
         $destinationUri = 'https://' + $uri.Host + "$($uri.LocalPath)" + $uri.Query
-    } else {
+    }
+    else {
         $destinationUri = 'https://' + $uri.Host + "$($uri.LocalPath)/$($path.Name)" + $uri.Query
     }
 
@@ -376,7 +378,8 @@ function CopyFileToContainer {
 
     try {
         & $script:azCopyExe $params
-    } catch {
+    }
+    catch {
         Write-Error "ERROR uploading file: $filePath to $containerURI"
         $script:fileContinue = $false
         return
@@ -385,14 +388,14 @@ function CopyFileToContainer {
 }
 
 #####################################################################
-Function Test-IsFileLocked {
+function Test-IsFileLocked {
 
     # copied from https://mcpmag.com/articles/2018/07/10/check-for-locked-file-using-powershell.aspx
 
     [cmdletbinding()]
     Param (
-        [parameter(Mandatory=$True,ValueFromPipeline=$True,ValueFromPipelineByPropertyName=$True)]
-        [Alias('FullName','PSPath')]
+        [parameter(Mandatory = $True, ValueFromPipeline = $True, ValueFromPipelineByPropertyName = $True)]
+        [Alias('FullName', 'PSPath')]
         [string[]] $Path
     )
 
@@ -403,13 +406,15 @@ Function Test-IsFileLocked {
             #Verify that this is a file and not a directory
             If ([System.IO.File]::Exists($Item)) {
                 Try {
-                    $FileStream = [System.IO.File]::Open($Item,'Open','Write')
+                    $FileStream = [System.IO.File]::Open($Item, 'Open', 'Write')
                     $FileStream.Close()
                     $FileStream.Dispose()
                     $IsLocked = $False
-                } Catch [System.UnauthorizedAccessException] {
+                }
+                Catch [System.UnauthorizedAccessException] {
                     $IsLocked = 'AccessDenied'
-                } Catch {
+                }
+                Catch {
                     $IsLocked = $True
                 }
                 [pscustomobject] @{
@@ -422,7 +427,7 @@ Function Test-IsFileLocked {
 }
 
 #####################################################################
-Function CleanUpSource {
+function CleanUpSource {
 
     [cmdletbinding()]
     Param (
@@ -441,7 +446,8 @@ Function CleanUpSource {
         Remove-Item -Path $sourcePath -Recurse -Force
         Write-Information "$sourcePath deleted ($($stopwatch.Elapsed))"
 
-    } elseif ($CleanUpDir) {
+    }
+    elseif ($CleanUpDir) {
         Move-Item -Path $sourcePath -Destination $CleanUpDir
         Write-Information "$sourcePath moved to $CleanupDir ($($stopwatch.Elapsed))"
     }
@@ -449,7 +455,7 @@ Function CleanUpSource {
 }
 
 #####################################################################
-Function UploadPartialZip {
+function UploadPartialZip {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
@@ -459,42 +465,69 @@ Function UploadPartialZip {
         [string] $ContainerUri,
 
         [Parameter()]
-        [int] $PartialZipUploadInterval = 60
+        [int] $PartialZipUploadInterval = 60,
 
+        [Parameter()]
+        [string] $BlobTier,
+
+        [Parameter()]
+        [string] $AzCopyExe,
+
+        [Parameter()]
+        [string] $OutputLog = "$env:TEMP\PartialZipUpload-$(Get-Date -Format 'yyyyMMdd').log"
     )
 
+    # start processing
     $path = ([System.IO.FileInfo] $FilePath).DirectoryName
     $uri = [uri] $ContainerUri
 
     $filesUploaded = @()
 
+    "$(Get-Date -Format u) Job started"  | Out-File -FilePath $OutputLog -Append
+
     while ($true) {
         $files = Get-ChildItem $path | Where-Object { $_.LastWriteTime.AddMinutes(1) -lt $(Get-Date) -and $filesUploaded -notcontains $_.Name }
         foreach ($file in $files) {
 
-            if (Test-IsFileLocked $file.FullName) {
+            # if file locked, copy to temp dir
+            $sourcePath = $file.FullName
+            $fileCopied = $false
+
+            # check for file lock
+            Try {
+                $FileStream = [System.IO.File]::Open($file, 'Open', 'Write')
+                $FileStream.Close()
+                $FileStream.Dispose()
+                $IsLocked = $False
+            }
+            Catch [System.UnauthorizedAccessException] {
+                $IsLocked = 'AccessDenied'
+            }
+            Catch {
+                $IsLocked = $True
+            }
+
+            # copy locked file to temp dir
+            if ($isLocked) {
+                $fileCopied = $true
                 $sourcePath = "$env:TEMP\$($file.Name)"
-                Copy-Item $file.FullName $sourcePath
+
+                Copy-Item $file.FullName $sourcePath 2>&1 >> $OutputLog
                 if (-not $?) {
                     continue
                 }
-                $fileCopied = $true
-
-            } else {
-                $sourcePath = $file.FullName
-                $fileCopied = $false
             }
 
             $destinationURI = 'https://' + $uri.Host + "$($uri.LocalPath)/$($file.Name)" + $uri.Query
-            Write-Host "copying...$sourcePath to $destinationUri"
+            "$(Get-Date -Format u) copying...$sourcePath to $destinationUri" | Out-File -FilePath $OutputLog -Append
             $params = @('copy', $sourcePath , $destinationUri)
-            if ($script:BlobTier) {
-                $params += ("--block-blob-tier=$script:BlobTier")
+            if ($BlobTier) {
+                $params += ("--block-blob-tier=$BlobTier")
             }
 
-            & $script:azCopyExe $params
+            & $AzCopyExe $params 2>&1 >> $OutputLog
             if (-not $?) {
-                Write-Error "ERROR copying $($file.FullName) to $destinationUri"
+                Write-Error "ERROR: unable to copy $sourcePath to $destinationUri" 2>&1 >> $OutputLog
                 continue
             }
 
@@ -504,16 +537,16 @@ Function UploadPartialZip {
             }
 
             $filesUploaded += $file.Name
-            Write-Host -Status "$($Uploaded.Count) copied"
+            "$(Get-Date -Format u) $($Uploaded.Count) copied" | Out-File -FilePath $transferLog -Append
         }
 
-        Write-Host "$($filesUploaded.Count) copied. Waiting for new files...($PartialZipUploadInterval secs)"
+        "$(Get-Date -Format u) $($filesUploaded.Count) copied. Waiting for new files...($PartialZipUploadInterval secs)" | Out-File -FilePath $OutputLog -Append
         Start-Sleep -Seconds $PartialZipUploadInterval
     }
 }
 
 #####################################################################
-Function SyncPartialZip {
+function SyncPartialZip {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
@@ -532,15 +565,14 @@ Function SyncPartialZip {
 
     try {
         & $script:azCopyExe $params
-    } catch {
+    }
+    catch {
         throw "ERROR syncing file: $path to $containerURI"
     }
 }
 
 #####################################################################
 # MAIN
-
-$scriptPath = $MyInvocation.InvocationName
 
 # check azcopy path
 Write-Progress -Activity "Checking environment..." -Status "validating AzCopy"
@@ -554,15 +586,6 @@ try {
 catch {
     Write-Error "Unable to find azcopy.exe command. Please make sure azcopy.exe is in your PATH or use -AzCopyCommandPath to specify azcopy.exe path" -ErrorAction Stop
 }
-
-#############
-# upload job
-if ($PartialZipPath) {
-    Write-Host "Monitoring zip files at: $PartialZipPath"
-    UploadPartialZip -FilePath $PartialZipPath -ContainerUri $ContainerURI -PartialZipUploadInterval $PartialZipUploadInterval
-    return
-}
-#############
 
 # check 7z command path
 Write-Progress -Activity "Checking environment..." -Status "validating 7z"
@@ -628,7 +651,7 @@ if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') {
         throw "Error getting container info for $ContainerName - "
     }
 
-    $ContainerURI = $storageAccount.PrimaryEndpoints.Blob + $ContainerName + $(New-AzStorageAccountSASToken -Context $storageAccount.context -Service Blob -ResourceType Service,Container,Object -Permission racwdlup -ExpiryTime $(Get-Date).AddDays(5))
+    $ContainerURI = $storageAccount.PrimaryEndpoints.Blob + $ContainerName + $(New-AzStorageAccountSASToken -Context $storageAccount.context -Service Blob -ResourceType Service, Container, Object -Permission racwdlup -ExpiryTime $(Get-Date).AddDays(5))
 }
 
 # check -CleanUpDir parameter
@@ -636,9 +659,10 @@ if (-not $CleanUpDir) {
     # do nothing
 }
 elseif ($CleanUpDir -eq 'Delete' -or $CleanUpDir -eq 'RecycleBin') {
-        # do nothing
+    # do nothing
 
-} else {
+}
+else {
     if (-not (Test-Path $CleanUpDir -PathType Container)) {
         throw "-CleanupDir $CleanUpDir is not valid. Must be either Delete, RecycleBin or a valid directory."
     }
@@ -648,13 +672,14 @@ elseif ($CleanUpDir -eq 'Delete' -or $CleanUpDir -eq 'RecycleBin') {
 if ($CompressTempDir -and -not $CompressTempDir.EndsWith('\')) {
     $CompressTempDir += '\'
 }
+
 if (-not $(Test-Path -Path $CompressTempDir)) {
     throw "Unable to find $CompressTempDir. Please check the -CompressTempDir and try again."
 }
 
 # check source filepath
 if (-not $(Test-Path -Path $SourceFilePath)) {
-    Write-Error "Unable to find $SourceFilePath. Please check the -SourcePath and try again." -ErrorAction Stop
+    Write-Error "Unable to find $SourceFilePath. Please check the -SourceFilePath and try again." -ErrorAction Stop
 }
 
 # invalid combination -SeparateEachDirectory will force the use of directory name
@@ -667,7 +692,8 @@ if ($SeparateEachDirectory) {
     # loop through each directory and upload a separate zip
     $sourcePaths = $(Get-ChildItem $SourceFilePath | Where-Object { $_.PSIsContainer }).FullName
 
-} else {
+}
+else {
     $sourcePaths = $SourceFilePath
 }
 
@@ -685,14 +711,16 @@ foreach ($sourcePath in $sourcePaths) {
     if ($BlobName) {
         # only one large blob being created
         $archivePath = $CompressTempDir + $BlobName
-    } else {
+    }
+    else {
         if ($SplitZipSize) {
             $archivePath = $CompressTempDir + $(Split-Path $sourcePath -Leaf)
             if (-not (Test-Path $archivePath)) {
                 New-Item -Path $archivePath -ItemType Directory
             }
             $archivePath = $archivePath + '\' + $(Split-Path $sourcePath -Leaf) + '.7z'
-        } else {
+        }
+        else {
             $archivePath = $CompressTempDir + $(Split-Path $sourcePath -Leaf) + '.7z'
         }
     }
@@ -700,14 +728,15 @@ foreach ($sourcePath in $sourcePaths) {
     # check to see if another archive is in progress
     $existingFiles = Get-Item "$($(Split-Path -Path $archivePath -Parent) + '\' + $(Split-Path -Path $archivePath -LeafBase) + '*')"
     if ($existingFiles) {
-        $lockedFiles = Test-IsFileLocked -Path $existingFiles.FullName | Where-Object {$_.IsLocked}
+        $lockedFiles = Test-IsFileLocked -Path $existingFiles.FullName | Where-Object { $_.IsLocked }
         if ($lockedFiles) {
             Write-Host "$sourcePath skipped. Existing $($lockedFiles.FullName) is locked."
             continue
-        } else {
-            Write-Host "Cleaning up leftover files $($existingFiles.FullName)"
+        }
+        else {
+            Write-Information "Cleaning up leftover files $($existingFiles.FullName)"
             $existingFiles | Remove-Item
-       }
+        }
     }
 
     # add date/datetime to filename
@@ -715,7 +744,8 @@ foreach ($sourcePath in $sourcePaths) {
         $path = [System.IO.FileInfo] $archivePath
         if ($AppendToBlobName -eq 'Time') {
             $dateStr = "{0:yyyyMMddHHmmss}" -f $(Get-Date)
-        } else {
+        }
+        else {
             $dateStr = "{0:yyyyMMdd}" -f $(Get-Date)
         }
         $archivePath = $path.DirectoryName + '\' + $path.BaseName + '_' + $dateStr + $path.Extension
@@ -726,15 +756,15 @@ foreach ($sourcePath in $sourcePaths) {
     Write-Host ''
 
     if ($PartialZipUploadInterval) {
-        Write-Host "Starting upload monitoring job..."
-        $scriptBlock = [ScriptBlock]::Create('Param ($p1, $p2, $p3, $p4) ' + $scriptPath + ' -PartialZipPath $p1 -ContainerUri $p2 -AzCopyCommandDir $p3 -PartialZipUploadInterval $p4')
-        $params = @{
-            Name         = $sourcePath
-            ScriptBlock  = $scriptBlock
-            ArgumentList = $archivePath, $ContainerURI, $AzCopyCommandDir, $PartialZipUploadInterval
-        }
-        $uploadJob = Start-Job @params
-        $uploadJob
+        $uploadLogPath = "$env:TEMP\PartialZipUpload-$(Get-Date -Format 'yyyyMMdd').log"
+
+        # extract & build UploadPartialZip function from current context to pass into job
+        $initScript = [ScriptBlock]::Create((Get-Command UploadPartialZip).ScriptBlock.StartPosition.Content)
+
+        $job = Start-Job -InitializationScript $initScript `
+            -ScriptBlock { UploadPartialZip -FilePath $using:archivePath -ContainerUri $using:ContainerUri -PartialZipUploadInterval $using:PartialZipUploadInterval -BlobTier $using:BlobTier -AzCopyExe $using:azcopyExe -OutputLog $using:uploadLogPath }
+
+        Write-Information "Upload Job $($job.Id) started. Check logs at: $uploadLogPath"
     }
 
     CompressPathToBlob -SourcePath $sourcePath -archivePath $archivePath
@@ -748,7 +778,8 @@ foreach ($sourcePath in $sourcePaths) {
     if ($PartialZipUploadInterval) {
         # copy any final files
         SyncPartialZip -filePath $archivePath -ContainerURI $ContainerURI
-    } else {
+    }
+    else {
         # copy all files
         CopyFileToContainer -filePath $archivePath -ContainerURI $ContainerURI
     }
@@ -777,15 +808,19 @@ foreach ($sourcePath in $sourcePaths) {
 }
 
 if ($archiveSuccesses) {
-    Write-Host ''
-    Write-Host '===== SUCCESSFULLY PROCESSED ====='
-    Write-Host $archiveSuccesses
+    Write-Information ''
+    Write-Information '===== SUCCESSFULLY PROCESSED ====='
+    $archiveSuccesses | ForEach-Object {
+        Write-Information $_
+    }
 }
 
 if ($archiveFailures) {
-    Write-Host ""
-    Write-Host "===== FAILED ====="
-    Write-Host $archiveFailures
+    Write-Information ""
+    Write-Information "===== FAILED ====="
+    $archiveFailures | ForEach-Object {
+        Write-Information $_
+    }
 }
 
 Write-Host ""

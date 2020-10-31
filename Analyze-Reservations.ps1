@@ -47,7 +47,10 @@ Param (
     [decimal] $VmUtilizationThreshold = 0.6,
 
     [Parameter()]
-    [string] $Delimiter = ','
+    [string] $Delimiter = ',',
+
+    [Parameter()]
+    [string] $VmPricingPath
 )
 
 Set-StrictMode -Version 3
@@ -77,6 +80,7 @@ Class ReserveVm {
     [int] $FamilyRatio
     [string] $Size
     [int] $CPU
+    [decimal] $Rate
     [decimal] $Usage = 0
     [decimal] $Cost = 0
     [decimal] $Utilization = 0
@@ -191,6 +195,7 @@ ForEach-Object {
             $vm.ResourceGroup = $row.'Resource Group'
             $vm.Name = Split-Path $row.'Instance Id' -Leaf
             $vm.Location = $row.'Resource Location'
+            $vm.Rate = $row.'ResourceRate'
 
             # AdditionalInfo
             $additionalInfo = $row.'AdditionalInfo' | ConvertFrom-Json
@@ -269,22 +274,64 @@ foreach ($key in $vms.Keys) {
 # REPORT SUMMARY
 
 # reservation eligible VMs
+# load pricing table (if provided)
+$vmPriceTable = @{}
+if ($VmPricingPath) {
+    Import-Csv $VmPricingPath `
+    | ForEach-Object {
+        $vmPrice = $_
+
+        $vmSize = 'Standard_' + $vmPrice.instance.Replace(' ', '_')
+
+        $RI1YrDiscount = 0
+        $RI3YrDiscount = 0
+        if ($vmPrice.payg) {
+            Write-Host "vmSize: $vmSize"
+            $RI1YrDiscount = [decimal] ($vmPrice.payg-$vmPrice.ri1year)/$vmPrice.payg
+            $RI3YrDiscount = [decimal] ($vmPrice.payg-$vmPrice.ri3year)/$vmPrice.payg
+        }
+
+        $vmPriceTable[$vmSize] = [PSCustomObject] @{
+            PAYG = [decimal] $vmPrice.payg
+            RI1Year = [decimal] $vmPrice.ri1year
+            RI3Year = [decimal] $vmPrice.ri3year
+            RI1YearDiscount = $RI1YrDiscount
+            RI3YearDiscount = $RI3YrDiscount
+        }
+    }
+}
+
+# filter eligible VMs and estimate RI costs
 $reservationVms = $vms.Values
 | Where-Object { $_.ReserveWorthy }
 | ForEach-Object {
+    $vmPrice = $vmPriceTable[$_.Size]
+    if ($vmPrice) {
+        $RI1YearDiscount = $vmPrice.RI1YearDiscount
+        $RI3YearDiscount = $vmPrice.RI3YearDiscount
+    } else {
+        $RI1YearDiscount = 0
+        $RI3YearDiscount = 0
+    }
+
     [PSCustomObject] @{
-        ResourceGroup = $_.ResourceGroup
-        Name          = $_.Name
-        BeginDate     = ('{0:M/d/yy}' -f $_.BeginDate)
-        EndDate       = ('{0:M/d/yy}' -f $_.EndDate)
-        Location      = $_.Location
-        Family        = $_.Family
-        FamilyRatio   = $_.FamilyRatio
-        Size          = $_.Size
-        CPU           = $_.CPU
-        Usage         = $_.Usage
-        Cost          = $_.Cost
-        Utilization   = $_.Utilization
+        ResourceGroup   = $_.ResourceGroup
+        Name            = $_.Name
+        BeginDate       = ('{0:M/d/yy}' -f $_.BeginDate)
+        EndDate         = ('{0:M/d/yy}' -f $_.EndDate)
+        Location        = $_.Location
+        Family          = $_.Family
+        FamilyRatio     = $_.FamilyRatio
+        Size            = $_.Size
+        CPU             = $_.CPU
+        Rate            = $_.Rate
+        Usage           = $_.Usage
+        Cost            = $_.Cost
+        Utilization     = $_.Utilization
+        RI1YearDiscount = $RI1YearDiscount
+        EstRI1YearCost  = (($_.EndDate-$_.BeginDate).TotalDays + 1) * 24 * $_.Rate * (1.0-$RI1YearDiscount)
+        RI3YearDiscount = $RI3YearDiscount
+        EstRI3YearCost  = (($_.EndDate-$_.BeginDate).TotalDays + 1) * 24 * $_.Rate * (1.0-$RI3YearDiscount)
     }
 }
 
