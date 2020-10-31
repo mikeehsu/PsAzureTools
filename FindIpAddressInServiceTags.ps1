@@ -24,7 +24,7 @@ FindIpAddressInServiceTags.ps1 40.90.23.208 -UseAPI
 [CmdletBinding()]
 
 Param (
-    [Parameter(Position=0, Mandatory = $true)]
+    [Parameter(Position = 0, Mandatory = $true)]
     [string] $IPAddress,
 
     [Parameter(Mandatory = $false)]
@@ -224,6 +224,162 @@ function PadIpAddress {
 }
 
 ############################################################
+function CompareSubnet {
+    # inspired by: http://www.gi-architects.co.uk/2016/02/powershell-check-if-ip-or-subnet-matchesfits/
+    param (
+        [Parameter(Mandatory)]
+        [string] $addr1,
+
+        [Parameter(Mandatory)]
+        [string] $addr2
+    )
+
+    # Separate the network address and lenght
+    $network1, [int] $subnetlen1 = $addr1.Split('/')
+    $network2, [int] $subnetlen2 = $addr2.Split('/')
+
+    #Convert network address to binary
+    [uint32] $unetwork1 = NetworkToBinary $network1
+    [uint32] $unetwork2 = NetworkToBinary $network2
+
+    #Check if subnet length exists and is less then 32(/32 is host, single ip so no calculation needed) if so convert to binary
+    if ($subnetlen1 -lt 32) {
+        [uint32] $mask1 = SubToBinary $subnetlen1
+    }
+
+    if ($subnetlen2 -lt 32) {
+        [uint32] $mask2 = SubToBinary $subnetlen2
+    }
+
+    #Compare the results
+    if ($mask1 -and $mask2) {
+        # If both inputs are subnets check which is smaller and check if it belongs in the larger one
+        if ($mask1 -lt $mask2) {
+            return CheckSubnetToNetwork $unetwork1 $mask1 $unetwork2
+        }
+        else {
+            return CheckNetworkToSubnet $unetwork2 $mask2 $unetwork1
+        }
+    }
+    elseIf ($mask1) {
+        # If second input is address and first input is subnet check if it belongs
+        return CheckSubnetToNetwork $unetwork1 $mask1 $unetwork2
+    }
+    elseIf ($mask2) {
+        # If first input is address and second input is subnet check if it belongs
+        return CheckNetworkToSubnet $unetwork2 $mask2 $unetwork1
+    }
+    else {
+        # If both inputs are ip check if they match
+        CheckNetworkToNetwork $unetwork1 $unetwork2
+    }
+}
+
+############################################################
+function CheckNetworkToSubnet {
+    [CmdletBinding()]
+
+    param (
+        [Parameter(Mandatory)]
+        [uint32] $un2,
+
+        [Parameter(Mandatory)]
+        [uint32] $ma2,
+
+        [Parameter(Mandatory)]
+        [uint32] $un1
+    )
+
+    if ($un2 -eq ($ma2 -band $un1)) {
+        return [PSCustomObject] @{
+            Condition = $True
+            Direction = 'LessThan'
+        }
+    }
+    else {
+        return [PSCustomObject] {
+            Condition = $False
+            Direction = ''
+        }
+    }
+}
+
+############################################################
+function CheckSubnetToNetwork {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [uint32]$un1,
+
+        [Parameter(Mandatory)]
+        [uint32]$ma1,
+
+        [Parameter(Mandatory)]
+        [uint32]$un2
+    )
+
+    if ($un1 -eq ($ma1 -band $un2)) {
+        return [PSCustomObject] @{
+            Condition = $true
+            Direction = "GreaterThan"
+        }
+    }
+    else {
+        return [PSCustomObject] @{
+            Condition = $false
+            Direction = ''
+        }
+    }
+}
+
+############################################################
+function CheckNetworkToNetwork {
+
+    parm (
+        [Parameter(Mandatory)]
+        [uint32] $un1,
+
+        [Paramter(Mandatory)]
+        [uint32] $un2
+    )
+
+
+    if ($un1 -eq $un2) {
+        return [PSCustomObject] @{
+            Condition = $True
+            Direction = "LessThan"
+        }
+    }
+    else {
+        return [PSCustomObject] @{
+            Condition = $False
+            Direction = ''
+        }
+    }
+}
+
+############################################################
+function SubToBinary {
+    param (
+        [Parameter(Mandatory)]
+        [int] $sub
+    )
+
+    return ((-bnot [uint32]0) -shl (32 - $sub))
+}
+
+function NetworkToBinary {
+    param (
+        [Parameter(Mandatory)]
+        [string] $network
+    )
+
+    $a = [uint32[]]$network.split('.')
+    return ($a[0] -shl 24) + ($a[1] -shl 16) + ($a[2] -shl 8) + $a[3]
+}
+
+
+############################################################
 function IsIpAddressInCIDR {
     Param(
         [parameter(Mandatory = $true)]
@@ -233,13 +389,8 @@ function IsIpAddressInCIDR {
         [string] $CIDRAddress
     )
 
-    $ipInfo = Get-IPv4NetworkInfo -CIDR $CIDRAddress
-
-    $IPAddress = PadIpAddress($IPAddress)
-    $ipInfo.HostMinIp = PadIpAddress($ipInfo.HostMinIp)
-    $ipInfo.HostMaxIP = PadIpAddress($ipInfo.HostMaxIp)
-
-    return ($IPAddress -ge $ipInfo.HostMinIp -and $IPAddress -le $ipInfo.HostMaxIP)
+    $result = CompareSubnet -addr1 $IPAddress -addr2 $CIDRAddress
+    return ($result.Condition -and $result.Direction -eq 'LessThan')
 }
 
 ############################################################
@@ -260,9 +411,9 @@ if ($UseAPI) {
 
     if ($Environment -and $Environment -ne $context.Environment.Name) {
         throw "-Environment must be the same as current context when -UseAPI is used. Please remove -Environment or -UseAPI."
-    } else {
+    }
+    else {
         $Environment = $context.Environment.Name
-
     }
 
     # get tags across all locations in environment
@@ -273,7 +424,8 @@ if ($UseAPI) {
         $serviceTags += Get-AzNetworkServiceTag -Location $location.Location
     }
 
-} else {
+}
+else {
     if (-not $environment) {
         $environment = $(Get-AzContext).Environment.Name
     }
@@ -328,9 +480,9 @@ foreach ($service in $serviceTags.values) {
         }
         if ($(IsIpAddressInCIDR -IPAddress $ipaddress -CIDRAddress $addressPrefix)) {
             [PSCustomObject]@{
-                Name = $($service.name)
-                Service = $($service.properties.systemService)
-                Region = $($service.properties.region)
+                Name          = $($service.name)
+                Service       = $($service.properties.systemService)
+                Region        = $($service.properties.region)
                 AddressPrefix = $($addressPrefix)
             }
             $found++
