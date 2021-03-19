@@ -15,5 +15,8 @@
   },
   "Constants": {
     "AccountOwnerId": "Azure"
+  },
+  "Transformations": {
+    "ExtendedCost": "'ExtendedCost'.Replace('$','')"
   }
 }

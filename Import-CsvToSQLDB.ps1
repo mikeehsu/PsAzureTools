@@ -50,7 +50,7 @@
 # skipping unnecessary data rows immediately after the header.
 #
 #.EXAMPLE
-# Import-CsvToSqlDb.ps1 -FilePath SampleCsv.csv -ConfigFilePath .\Sample\SampleLoadCsvToDBForBilling.json
+# Import-CsvToSqlDb.ps1 -FilePath SampleCsv.csv -ConfigFilePath .\Sample\SampleImportCsvToDBForBilling.json
 #
 #.NOTES
 #
@@ -346,10 +346,36 @@ foreach ($constant in $map.Constants.PSObject.Properties) {
     $constantExpression += "`$tableRow[$($match.dbColumnNum)] = '" + $constant.value + "'"
 }
 
+# build transformation assignments
+$transformationExpression = ''
+foreach ($transformation in $map.Transformations.PsObject.Properties) {
+    $match = $mapping | Where-Object {$_.dbColumn -eq $transformation.name}
+    if (-not $match) {
+        Write-Error "No column found matching $($transformation.name)" -ErrorAction Stop
+        return
+    }
+
+    $statement = $transformation.Value
+    foreach ($item in $mapping) {
+        if ((-not $item.fileColumn) -or (-not $item.dbColumn) -or ($item.fileColumn -eq "''")) {
+            continue
+        }
+
+        if ($transformationExpression) {
+            $transformationExpression += "; "
+        }
+
+        $statement = $statement.Replace($item.fileColumn, "`$fileRow." + $item.fileColumn)
+    }
+
+    $transformationExpression += "`$tableRow[$($match.dbColumnNum)] = `$(" + $statement + ")"
+}
+
 # debug output
 Write-Verbose "Constants: $constantExpression"
 Write-Verbose "JSON expansion: $expandJsonExpression"
 Write-Verbose "Mapped Columns: $rowExpression"
+Write-Verbose "Transformation Columns: $transformationExpression"
 #endregion
 
 #region -- Get rowcount of file
@@ -413,6 +439,11 @@ Get-Content -Path $filePath -ErrorAction Stop |
         # assign all the mappinge
         Invoke-Expression $rowExpression
 
+        # assign transformations
+        if ($transformationExpression) {
+            Invoke-Expression $transformationExpression
+        }
+
         # load the SQL datatable
         $null = $tableData.Rows.Add($tableRow)
         $added++
@@ -421,9 +452,10 @@ Get-Content -Path $filePath -ErrorAction Stop |
             try {
                 $bulkcopy.WriteToServer($tableData)
             } catch {
-                Write-Output "Error on or about row $i"
-                Write-Output $tableData.Rows
-                throw
+                if ($BatchSize -le 10) {
+                    Write-Output $tableData.Rows
+                }
+                throw "Data error on or about row $added-$BatchSize thru $($added)"
                 return
             } finally {
                 $tableData.Clear()
