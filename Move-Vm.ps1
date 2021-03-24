@@ -19,8 +19,14 @@ The name of the availability set to move the virtual machine to.
 .PARAMETER RemoveAvailabilitySet
 Set this switch to remove the VM from an availability set
 
+.PARAMETER Zone
+The availability zone to move the VM to.
+
 .PARAMETER VmSize
 Provide a new VmSize to resize the VM
+
+.PARAMETER Spot
+Move VM to a Spot Instance
 
 .EXAMPLE
 Move-VM.ps1 -ResourceGroupName myRg -VmName myVm -AvailabilitySetName myAvSet
@@ -47,7 +53,9 @@ Param (
 
     [string] $VmSize,
 
-    [ValidateSet(1,2,3)]
+    [switch] $Spot,
+
+    [ValidateSet($null,1,2,3)]
     [int] $Zone
 )
 
@@ -117,10 +125,12 @@ if ($VmSize -ne $sourceVm.HardwareProfile.VmSize -or $Zone -ne $sourceVm.Zones) 
     }
 
     # check to make sure Vm SKU is available in a zone
-    $size = $size | Where-Object {$_.LocationInfo.Zones -contains $Zone}
-    if (-not $size) {
-        Write-Error "VmSize $VmSize is not available in zone $Zone"
-        return
+    if ($Zone) {
+        $size = $size | Where-Object {$_.LocationInfo.Zones -contains $Zone}
+        if (-not $size) {
+            Write-Error "VmSize $VmSize is not available in zone $Zone"
+            return
+        }
     }
 
     # determine actions taken
@@ -183,13 +193,16 @@ if ($RemoveAvailabilitySet) {
 } elseif ($sourceVm.AvailabilitySetReference) {
     $params += @{ AvailabilitySetId = $sourceVm.AvailabilitySetReference.Id }
 }
+
+if ($Spot) {
+    $params += @{ Priority = 'Spot' }
+}
 #endregion
 
 # create the VM config
 $newVm = New-AzVMConfig @params
 
 #region -- Connect original NICs
-Write-Verbose 'assigning original NIC cards'
 foreach ($nic in $sourceVm.NetworkProfile.NetworkInterfaces) {
     $result = Add-AzVMNetworkInterface -VM $newVM -Id $nic.Id
 }
@@ -224,7 +237,7 @@ if ($Zone -ne $sourceVm.Zones) {
         }
     }
 
-    $disks | ForEach-Object -parallel {
+    $disks | ForEach-Object {
         if ($_.Id -match '[^\/]+?$') {
             $diskName = $matches[0]
             $snapshotName = $diskName + '_snap'
@@ -233,11 +246,13 @@ if ($Zone -ne $sourceVm.Zones) {
             throw "Unable to find disk name in Id:$($_.Id)"
         }
 
+        Write-Verbose "Creating snapshot $snapshotName"
         $snapshotConfig =  New-AzSnapshotConfig -SourceUri $_.Id -Location $sourceVm.Location -CreateOption copy
         $snapshot = New-AzSnapshot -ResourceGroupName $sourceVm.ResourceGroupName -SnapshotName $snapshotName -Snapshot $snapshotConfig
 
+        Write-Verbose "Creating copy of disk $diskCopyName"
         $diskConfig = New-AzDiskConfig -SkuName $_.storageType -Location $sourceVm.Location -Zone $zone -CreateOption Copy -SourceResourceId $snapshot.Id
-        $disk = New-AzDisk -Disk $diskConfig -ResourceGroupName $sourceVm.ResourceGroupName -DiskName $diskCopyName
+        $disk = New-AzDisk -ResourceGroupName $sourceVm.ResourceGroupName -DiskName $diskCopyName -Disk $diskConfig
     }
 }
 #endregion
@@ -268,6 +283,8 @@ try {
     $result = New-AzVM -VM $newVm -ResourceGroupName $ResourceGroupName -Location $sourceVm.Location
     Write-Debug $result
 } catch {
+    Write-Progress -Activity "Failed to move VM!!" -Status "restoring orginal VM $(sourceVm.Name)"
+    $result = New-AzVm -VM $sourceVm.Name -ResourceGroupName $sourceVm.ResourceGroupName -Location $sourceVm.Location
     throw $_
     return
 }
@@ -276,3 +293,4 @@ try {
 Write-Host "VM ($($newVm.Name)) updated"
 $actionsTaken | ForEach-Object {Write-Host $('  - ' + $_) }
 Write-Host "NOTE: Please verify the diagnostic storage account to ensure the logs are written to the proper location."
+Write-Host "      Once successful VM move has been confirmed you can remove the orignal disk and snapshots."
