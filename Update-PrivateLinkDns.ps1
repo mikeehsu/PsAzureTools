@@ -100,14 +100,14 @@ else {
 #endregion
 
 #region -- load all current DNS record sets related to privatelink
-$recordSets = [System.Collections.ArrayList] @()
+$recordSets = [System.Collections.Generic.List[PSObject]]::New()
 $zones = Get-AzPrivateDnsZone -ResourceGroupName $ResourceGroupName | Where-Object { $_.Name.StartsWith('privatelink.') }
 foreach ($zone in $zones) {
     $recordSets += Get-AzPrivateDnsRecordSet -ResourceGroupName $ResourceGroupName -ZoneName $zone.Name | Where-Object { $_.RecordType -eq 'A' }
 }
 #endregion
 
-#regaion -- check all endpoints and ensure the DNS recordset exist or are created
+#region -- check all endpoints and ensure the DNS recordset exist or are created
 $updateCount = 0
 
 foreach ($endpoint in $endpoints) {
@@ -152,6 +152,6 @@ foreach ($endpoint in $endpoints) {
         ++$updateCount
     }
 }
+#endregion
 
 Write-Information "$updateCount DNS recordsets updated" -InformationAction Continue
-#endregion
