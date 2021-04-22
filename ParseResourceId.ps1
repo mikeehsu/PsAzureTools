@@ -17,7 +17,7 @@ function ParseResourceId
 {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory)]
+        [Parameter(Position=0, Mandatory, ValueFromPipeline)]
         [string] $ResourceId
     )
 
