@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Parse Auzre ResourceId
+Convert Azure ResourceId to Object
 
 .DESCRIPTION
 Parse the Azure ResourceId into its component parts and return an object
@@ -9,11 +9,11 @@ Parse the Azure ResourceId into its component parts and return an object
 ResourceId to parse
 
 .EXAMPLE
-ParseResourceId -ResourceId $resourceId
+ConvertResourceId -ResourceId $resourceId
 
 .NOTES
 #>
-function ParseResourceId
+function ConvertResourceId
 {
     [CmdletBinding()]
     param (
