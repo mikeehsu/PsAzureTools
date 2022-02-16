@@ -98,7 +98,7 @@ if ($StorageAccountName) {
 
         SaveProviderOperations -ResourceGroupName $ResourceGroupName -StorageAccountName $StorageAccountName -ContainerName $ContainerName -BlobName $currentFilename
 
-        [array] $blobs = Get-AzStorageBlob -Container $ContainerName -Context $storageAccount.context | Where-Object { $_.Name -like "$($BlobPrefix)*" } | Sort-Object -Property Name -Descending
+        [array] $blobs = Get-AzStorageBlob -Container $ContainerName -Context $storageAccount.context | Where-Object { $_.Name -match "$($BlobPrefix)\d{4}-\d{2}-\d{2}" } | Sort-Object -Property Name -Descending
         if (-not $blobs -or $blobs.Count -eq 0) {
             Write-Erorr "No files starting with $($BlobPrefix) found in container" -ErrorAction Stop
             return
@@ -108,7 +108,7 @@ if ($StorageAccountName) {
             return
 
         } elseif ($blobs[0].Name -ne $currentFilename) {
-            Write-Error "Unable to find today's file $($currentFileName) in $($StorageAccountName/$ContainerName)" -ErrorAction Stop
+            Write-Error "Unable to find today's file $($currentFileName) in $($StorageAccountName + '/' + $ContainerName)" -ErrorAction Stop
             return
         }
 
@@ -147,7 +147,7 @@ if ($StorageAccountName) {
 $currentHash = Get-FileHash -Path $currentFilePath -ErrorAction Stop
 $previousHash = Get-FileHash -Path $previousFilePath -ErrorAction Stop
 if ($currentHash.Hash -eq $previousHash.Hash) {
-    Write-Host 'Current and previous Service Tag files hash match. No changes found.'
+    Write-Host 'Current and previous file hashes match. No changes found.'
     return
 }
 
