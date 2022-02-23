@@ -48,7 +48,7 @@ catch {
 
 # get table handle
 $storageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName -ErrorAction Stop
-$storageTable = Get-AzStorageTable -Name ResourceGroupDetail -Context $storageAccount.context -ErrorAction Stop
+$storageTable = Get-AzStorageTable -Name $TableName -Context $storageAccount.context -ErrorAction Stop
 $cloudTable = $storageTable.CloudTable
 
 
@@ -89,14 +89,19 @@ Get-Content -Path $Path -ErrorAction Stop |
         # build the property hash
         $hash = @{}
         $row.PSObject.Properties | ForEach-Object {
-            $hash[$_.Name] = $_.Value
+            if ($null -eq $_.Value) {
+                $hash[$_.Name] = ''
+            } else {
+                $hash[$_.Name] = $_.Value
+            }
+
             if ($_.Name -eq $RowKey) {
                 $key = $_.Value
             }
         }
 
         try {
-            Add-AzTableRow -table $cloudTable -PartitionKey 1 -rowkey $key -property $hash
+            $null = Add-AzTableRow -table $cloudTable -PartitionKey 1 -rowkey $key -property $hash
             $added++
         } catch {
             Write-Error -Exception $_.Exception
