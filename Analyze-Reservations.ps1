@@ -8,14 +8,6 @@ Analyze an Azure detailed usage bill and show VMs which are fully utilized (with
 .PARAMETER FilePath
 Source path for the Azure Billing CSV file
 
-.PARAMETER ShowDetails
-Show the details behind the reservation recommendations
-
-.PARAMETER ShowIneligibleVms
-Show details for the virtual machines that were not recommended for reservation
-
-.PARAMETER ShowIneligibleDisks
-Show details for the disks that were not recommended for reservation
 
 .PARAMETER VmUtilizationThreshold
 Only show Virtual Machines that pass a certain utilization threshold. Default is 0.6
@@ -32,13 +24,13 @@ Param (
     [string] $FilePath,
 
     [Parameter()]
+    [string] $FamilySizeFilePath,
+
+    [Parameter()]
     [switch] $ShowDetails,
 
     [Parameter()]
-    [switch] $ShowIneligibleVms,
-
-    [Parameter()]
-    [switch] $ShowIneligibleDisks,
+    [switch] $IncludeReservedVMs,
 
     [Parameter()]
     [string] $ExcelPath,
@@ -50,7 +42,7 @@ Param (
     [string] $Delimiter = ',',
 
     [Parameter()]
-    [string] $VmPricingPath
+    [string] $PriceLocation
 )
 
 Set-StrictMode -Version 3
@@ -115,22 +107,48 @@ catch {
 #endregion
 
 #region -- load family info
-Write-Verbose "Loading column headers..."
+Write-Verbose "Loading Family Info..."
 
-$familySize = $null
-$pageHTML = Invoke-WebRequest $FamilyUrl -UseBasicParsing
-if ($pageHTML -and $pageHtml.StatusCode -eq 200) {
-    $familySize = @{}
-    $pageHTML.Content | ConvertFrom-Csv | ForEach-Object {
+$familySize = @{}
+
+if ($FamilySizeFilePath) {
+    Get-Content -Path $FamilySizeFilePath | ConvertFrom-Csv | ForEach-Object {
         $familySize[$_.ArmSkuName] = [PsCustomObject] @{
             ArmSkuName                   = $_.ArmSkuName
             InstanceSizeFlexibilityGroup = $_.InstanceSizeFlexibilityGroup
             Ratio                        = $_.Ratio
         }
     }
-}
-else {
-    Write-Warning "Unable to load Family Flexibility Groups from $FamilyUrl, will use Meter Sub-Category as a proxy"
+
+} else {
+    $header = $null
+    $pageHTML = Invoke-WebRequest $FamilyUrl -UseBasicParsing
+    if ($pageHTML -and $pageHtml.StatusCode -eq 200) {
+        ($pageHTML.RawContent -split '\r?\n').Trim() | ForEach-Object {
+            $row = $_
+
+            if ($header) {
+                # header has been set
+                $rowData = $row | ConvertFrom-Csv -Header $header
+                if ($rowData) {
+                    $familySize[$rowData.ArmSkuName] = [PsCustomObject] @{
+                        ArmSkuName                   = $rowData.ArmSkuName
+                        InstanceSizeFlexibilityGroup = $rowData.InstanceSizeFlexibilityGroup
+                        Ratio                        = $rowData.Ratio
+                    }
+                }
+            } else {
+                # look for header
+                if ($row.Contains('InstanceSizeFlexibilityGroup')) {
+                    $header = $row.Replace('?','') -Split ','
+                }
+            }
+
+        }
+    }
+    else {
+        Write-Warning "Unable to load Family Flexibility Groups from $FamilyUrl, will use Meter Sub-Category as a proxy"
+    }
 }
 #endregion
 
@@ -138,25 +156,27 @@ else {
 Write-Verbose "Loading column headers..."
 
 $sampleSize = 10
-$rowCount = 0
-$headerRowNumber = $null
 $file = Get-Content -Path $filePath -Head $sampleSize -ErrorAction Stop
 if (-not $file) {
     throw
 }
 
+$headerRowCount = 0
+$headerFound = $false
 foreach ($row in $file) {
-    if ($row.Contains($Delimiter)) {
-        $header = $row
-        $headerRowNumber = $rowCount
+    $headerRowCount++
+    if ($row.Contains('Subscription')) {
+        $headerFound = $true
         break
     }
-    $rowCount++
 }
+if (-not $headerFound) {
+    throw "No header found. Please check $filePath and try again."
+}
+$row = $row.Replace(' ', '')
+$row = $row.Replace('ExtendedCost', 'Cost')
+$header = $row -Split $Delimiter
 
-if (-not $header) {
-    throw "No delimiters found. Please check file or -Delimiter setting and try again."
-}
 #endregion
 
 $nullDate = [DateTime] 0
@@ -168,8 +188,8 @@ $vms = @{}
 $disks = @{}
 
 Get-Content -Path $filePath -ErrorAction Stop |
-Select-Object -Skip $headerRowNumber |
-ConvertFrom-Csv -Delimiter $Delimiter |
+Select-Object -Skip $headerRowCount |
+ConvertFrom-Csv -Delimiter $Delimiter -Header $header |
 ForEach-Object {
 
     $rowCount++
@@ -184,17 +204,17 @@ ForEach-Object {
     }
     #endregion
 
-    if ($row.'Meter Category' -eq 'Virtual Machines') {
+    if ($row.'MeterCategory' -eq 'Virtual Machines') {
 
         #summarize each VM
-        $vm = $vms[$row.'Instance Id']
+        $vm = $vms[$row.'InstanceId']
         if (-not $vm) {
-            $vms[$row.'Instance ID'] = [ReserveVm]::New()
+            $vms[$row.'InstanceId'] = [ReserveVm]::New()
 
-            $vm = $vms[$row.'Instance ID']
-            $vm.ResourceGroup = $row.'Resource Group'
-            $vm.Name = Split-Path $row.'Instance Id' -Leaf
-            $vm.Location = $row.'Resource Location'
+            $vm = $vms[$row.'InstanceId']
+            $vm.ResourceGroup = $row.'ResourceGroup'
+            $vm.Name = Split-Path $row.'InstanceId' -Leaf
+            $vm.Location = $row.'ResourceLocation'
             $vm.Rate = $row.'ResourceRate'
 
             # AdditionalInfo
@@ -210,7 +230,7 @@ ForEach-Object {
                 }
             }
             else {
-                $vm.Family = $row.'Meter Sub-Category'
+                $vm.Family = $row.'MeterSubCategory'
             }
         }
 
@@ -222,24 +242,24 @@ ForEach-Object {
             $vm.EndDate = $row.'Date'
         }
 
-        $vm.Usage += $row.'Consumed Quantity'
-        $vm.Cost += $row.'ExtendedCost'
+        $vm.Usage += $row.'ConsumedQuantity'
+        $vm.Cost += $row.'Cost'
 
     }
-    elseif ($row.'Meter Category' -eq 'Storage' -and $row.'Meter Name'.EndsWith('Disks')) {
+    elseif ($row.'MeterCategory' -eq 'Storage' -and $row.'MeterName'.EndsWith('Disks')) {
         # summarize disks
-        $disk = $disks[$row.'Instance ID']
+        $disk = $disks[$row.'InstanceId']
         if (-not $disk) {
-            $disks[$row.'Instance ID'] = [ReserveDisk]::New()
+            $disks[$row.'InstanceId'] = [ReserveDisk]::New()
 
-            $disk = $disks[$row.'Instance ID']
-            $disk.ResourceGroup = $row.'Resource Group'
-            $disk.Name = Split-Path $row.'Instance Id' -Leaf
-            $disk.Location = $row.'Resource Location'
-            $disk.Size = $row.'Meter Name'.Replace(' Disks', '')
+            $disk = $disks[$row.'InstanceId']
+            $disk.ResourceGroup = $row.'ResourceGroup'
+            $disk.Name = Split-Path $row.'InstanceId' -Leaf
+            $disk.Location = $row.'ResourceLocation'
+            $disk.Size = $row.'MeterName'.Replace(' Disks', '')
         }
-        $disk.Usage += $row.'Consumed Quantity'
-        $disk.Cost += $row.'ExtendedCost'
+        $disk.Usage += $row.'ConsumedQuantity'
+        $disk.Cost += $row.'Cost'
     }
 
     # update progress
@@ -251,6 +271,14 @@ ForEach-Object {
 Write-Progress -Activity "Analyzing $FilePath..." -Completed
 
 # file post processing
+
+
+# load VM pricing table
+Write-Verbose 'Getting pricing information for Virtual Machines...'
+$vmPriceTable = @{}
+.\Get-PriceTable.ps1 -Location $PriceLocation -Product 'VirtualMachines' | ForEach-Object {
+    $vmPriceTable[$_.name] = $_
+}
 
 #region -- calculate utilization rate
 foreach ($key in $vms.Keys) {
@@ -264,7 +292,12 @@ foreach ($key in $vms.Keys) {
         $daysAlive = ([DateTime] $vm.EndDate - [DateTime] $vm.BeginDate).TotalDays + 1
         $vm.Utilization = $vm.Usage / ($daysAlive * 24)
 
-        if ($vm.Utilization -ge $VmUtilizationThreshold -and $vm.FamilyRatio -ne 0 -and $vm.Cost -ne 0) {
+        if ($vm.Utilization -ge $VmUtilizationThreshold -and
+            $vm.FamilyRatio -ne 0 -and
+            ($vm.Cost -ne 0 -or $IncludeReservedVMs) -and
+            $vmPriceTable[$vm.Size].RI1YearPrice -ne 0 -and
+            $vmPriceTable[$vm.Size].RI3YearPrice -ne 0) {
+
             $vm.ReserveWorthy = $true
         }
     }
@@ -273,45 +306,19 @@ foreach ($key in $vms.Keys) {
 
 # REPORT SUMMARY
 
-# reservation eligible VMs
-# load pricing table (if provided)
-$vmPriceTable = @{}
-if ($VmPricingPath) {
-    Import-Csv $VmPricingPath `
-    | ForEach-Object {
-        $vmPrice = $_
-
-        $vmSize = 'Standard_' + $vmPrice.instance.Replace(' ', '_')
-
-        $RI1YrDiscount = 0
-        $RI3YrDiscount = 0
-        if ($vmPrice.payg) {
-            Write-Host "vmSize: $vmSize"
-            $RI1YrDiscount = [decimal] ($vmPrice.payg-$vmPrice.ri1year)/$vmPrice.payg
-            $RI3YrDiscount = [decimal] ($vmPrice.payg-$vmPrice.ri3year)/$vmPrice.payg
-        }
-
-        $vmPriceTable[$vmSize] = [PSCustomObject] @{
-            PAYG = [decimal] $vmPrice.payg
-            RI1Year = [decimal] $vmPrice.ri1year
-            RI3Year = [decimal] $vmPrice.ri3year
-            RI1YearDiscount = $RI1YrDiscount
-            RI3YearDiscount = $RI3YrDiscount
-        }
-    }
-}
-
 # filter eligible VMs and estimate RI costs
 $reservationVms = $vms.Values
 | Where-Object { $_.ReserveWorthy }
 | ForEach-Object {
     $vmPrice = $vmPriceTable[$_.Size]
     if ($vmPrice) {
-        $RI1YearDiscount = $vmPrice.RI1YearDiscount
-        $RI3YearDiscount = $vmPrice.RI3YearDiscount
+        $PAYGPrice       = $vmPrice.paygPrice
+        $RI1YearPrice    = $vmPrice.RI1YearPrice
+        $RI3YearPrice    = $vmPrice.RI3YearPrice
     } else {
-        $RI1YearDiscount = 0
-        $RI3YearDiscount = 0
+        $paygPrice = 0
+        $RI1YearPrice = 0
+        $RI3YearPrice = 0
     }
 
     [PSCustomObject] @{
@@ -328,10 +335,12 @@ $reservationVms = $vms.Values
         Usage           = $_.Usage
         Cost            = $_.Cost
         Utilization     = $_.Utilization
-        RI1YearDiscount = $RI1YearDiscount
-        EstRI1YearCost  = (($_.EndDate-$_.BeginDate).TotalDays + 1) * 24 * $_.Rate * (1.0-$RI1YearDiscount)
-        RI3YearDiscount = $RI3YearDiscount
-        EstRI3YearCost  = (($_.EndDate-$_.BeginDate).TotalDays + 1) * 24 * $_.Rate * (1.0-$RI3YearDiscount)
+        PAYG            = $PAYGPrice
+        PAYGYearCost    = $PAYGPrice * 12
+        RI1YearDiscount = ($PAYGPrice - $RI1YearPrice)/$PAYGPrice
+        EstRI1YearCost  = $RI1YearPrice * 12
+        RI3YearDiscount = ($PAYGPrice - $RI3YearPrice)/$PAYGPrice
+        EstRI3YearCost  = $RI3YearPrice * 12
     }
 }
 
@@ -358,41 +367,54 @@ $ineligibleVms = $vms.Values
     }
 }
 
-if ($ShowIneligibleVms) {
-    Write-Output "Ineligible Virtual Machine Details"
-    $ineligibleVms | Format-Table
-}
+# if ($ShowIneligibleVms) {
+#     Write-Output "Ineligible Virtual Machine Details"
+#     $ineligibleVms | Format-Table
+# }
 
-# group by Family
-Write-Output "Family Size Virtual Machine Summary"
-$familySummary = $reservationVms
-| Group-Object Location, Family
-| ForEach-Object {
-    $Location, $Family = ($_.Name -split ',').Trim()
-    $Count = $_.Count
-    $FamilyRatio, $CPU, $Cost = ($_.Group | Measure-Object -Property FamilyRatio, CPU, Cost -Sum ).Sum
+# # group by Family
+# Write-Output "Family Size Virtual Machine Summary"
+# $familySummary = $reservationVms
+# | Group-Object Location, Family
+# | ForEach-Object {
+#     $Location, $Family = ($_.Name -split ',').Trim()
+#     $Count = $_.Count
+#     $FamilyRatio, $CPU, $Cost, $EstRI1YearCost, $EstRI3YearCost = ($_.Group | Measure-Object -Property FamilyRatio, CPU, Cost, EstRIYearCost, EstRI3YearCost -Sum).Sum
 
-    [PSCustomObject] @{
-        Location    = $Location
-        Family      = $Family
-        Count       = $Count
-        FamilyRatio = $FamilyRatio
-        CPU         = $CPU
-        Cost        = $Cost
-    }
-}
-$familySummary | Format-Table
+#     [PSCustomObject] @{
+#         Location    = $Location
+#         Family      = $Family
+#         Count       = $Count
+#         FamilyRatio = $FamilyRatio
+#         CPU         = $CPU
+#         Cost        = $Cost
+#         EstRI1YearCost = $EstRI1YearCost
+#         EstRI3YearCost = $EstRI3YearCost
+#     }
+# }
+# $familySummary | Format-Table
 
 # disk reservations
+# load VM pricing table
+Write-Verbose 'Getting pricing information for Disks...'
+$diskPriceTable = @{}
+.\Get-PriceTable.ps1 -Location $PriceLocation -Product 'Disks' | ForEach-Object {
+    $disk = $_
+    $name = $_.Name.split(' ')[0]
+    $diskPriceTable[$name] = $disk
+}
+
 $reservationDisks = $disks.Values
-| Where-Object { $eligibleDisks -contains $_.Size -and $_.Cost -gt 0}
+| Where-Object { $eligibleDisks -contains $_.Size -and ($_.Cost -gt 0 -or $IncludeReservedVMs) }
 | ForEach-Object { [PSCustomObject] @{
-        ResourceGroup = $_.ResourceGroup
-        Name          = $_.Name
-        Location      = $_.Location
-        Size          = $_.Size
-        Usage         = $_.Usage
-        Cost          = $_.Cost
+        ResourceGroup   = $_.ResourceGroup
+        Name            = $_.Name
+        Location        = $_.Location
+        Size            = $_.Size
+        Usage           = $_.Usage
+        Cost            = $_.Cost
+        PAYGYearCost    = $diskPriceTable[$_.Size].PaygPrice * 12
+        EstRI1YearCost  = $diskPriceTable[$_.Size].RI1YearPrice * 12
     }
 }
 
@@ -414,10 +436,10 @@ $ineligibleDisks = $disks.Values
     }
 }
 
-if ($ShowIneligibleDisks) {
-    Write-Output "Ineligible Disks Details"
-    $ineligibleDisks | Format-Table
-}
+# if ($ShowIneligibleDisks) {
+#     Write-Output "Ineligible Disks Details"
+#     $ineligibleDisks | Format-Table
+# }
 
 # disk summary
 $diskSummary = $reservationDisks
@@ -425,19 +447,18 @@ $diskSummary = $reservationDisks
 | ForEach-Object {
     $Location, $Size = ($_.Name -split ',').Trim()
     $Count = $_.Count
-    $Cost = ($_.Group | Measure-Object -Property Cost -Sum ).Sum
+    $Cost, $EstRI1YearCost = ($_.Group | Measure-Object -Property Cost,EstRI1YearCost -Sum ).Sum
 
     [PSCustomObject] @{
-        Location = $Location
-        Size     = $Size
-        Count    = $Count
-        Cost     = $Cost
+        Location     = $Location
+        Size         = $Size
+        Count        = $Count
+        Cost         = $Cost
+        EstRI1YearCost = $EstRI1YearCost
     }
 }
-
 Write-Output "Recommended Disks Summary"
 $diskSummary | Format-Table
-
 
 $totalDays = ([DateTime] $endDate - [DateTime] $beginDate).TotalDays + 1
 
@@ -459,13 +480,13 @@ if ($ExcelPath) {
 
     # export Vm data
     $ptDef = New-PivotTableDefinition -Activate -PivotTableName 'Vm-Family-Summary' `
-        -PivotRows 'Location','Family','Size' -PivotData @{Name='Count'; FamilyRatio='Sum'; CPU='Sum'; Cost='Sum'} -PivotDataToColumn
+        -PivotRows 'Location','Family','Size' -PivotData @{Name='Count'; FamilyRatio='Sum'; CPU='Sum'; Cost='Sum'; PAYGYearCost='Sum'; EstRI1YearCost='Sum'; EstRI3YearCost='Sum'} -PivotDataToColumn
     $reservationVms | Sort-Object -Property Family,Size,Name | Export-Excel $ExcelPath -WorkSheet 'Vm-Reservations' -AutoSize -AutoFilter -PivotTableDefinition $ptDef
     $ineligibleVms | Export-Excel $ExcelPath -WorksheetName 'Vm-Ineligible' -AutoSize -AutoFilter
 
     # export disks data
     $ptDef = New-PivotTableDefinition -Activate -PivotTableName 'Disk-Size-Summary' `
-        -PivotRows 'Location','Size' -PivotData @{Name='Count'; Cost='Sum'} -PivotDataToColumn
+        -PivotRows 'Location','Size' -PivotData @{Name='Count'; Cost='Sum'; EstRI1YearCost='Sum'} -PivotDataToColumn
     $reservationDisks | Sort-Object -Property Location,Size,Name | Export-Excel $ExcelPath -WorksheetName 'Disk-Reservations' -AutoSize -AutoFilter -PivotTableDefinition $ptDef
     $ineligibleDisks | Export-Excel $ExcelPath -WorksheetName 'Disk-Ineligible' -AutoSize -AutoFilter
 }
