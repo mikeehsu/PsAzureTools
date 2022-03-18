@@ -56,7 +56,7 @@ Param (
     [switch] $Spot,
 
     [ValidateSet($null,1,2,3)]
-    [int] $Zone
+    [int] $Zone = $null
 )
 
 ############################################################
@@ -203,7 +203,19 @@ if ($Spot) {
 $newVm = New-AzVMConfig @params
 
 #region -- Connect original NICs
+Write-Progress -Activity "Moving VM..." -Status "checking network configurations"
 foreach ($nic in $sourceVm.NetworkProfile.NetworkInterfaces) {
+    if ($Zone) {
+        $card = Get-AzNetworkInterface -ResourceId $nic.Id
+        $publicIpResourceIds = $card.IpConfigurations.PublicIpAddress.Id
+        foreach ($publicIpResourceId in $publicIpResourceIds) {
+            $publicIp = Get-AzPublicIpAddress -Name (Split-Path $publicIpResourceId -Leaf)
+            if ((-not $publicIp.Zones) -or ($publicIp.Zones -ne $Zone)) {
+                Write-Error "Cannot move VM with public IP address ($($publicIp.Name)) in different zone from target zone ($Zone)."
+                return
+            }
+        }
+    }
     $result = Add-AzVMNetworkInterface -VM $newVM -Id $nic.Id
 }
 #endregion
@@ -246,13 +258,15 @@ if ($Zone -ne $sourceVm.Zones) {
             throw "Unable to find disk name in Id:$($_.Id)"
         }
 
-        Write-Verbose "Creating snapshot $snapshotName"
+        Write-Progress -Activity "Moving VM..." -Status "Creating snapshot $snapshotName"
         $snapshotConfig =  New-AzSnapshotConfig -SourceUri $_.Id -Location $sourceVm.Location -CreateOption copy
         $snapshot = New-AzSnapshot -ResourceGroupName $sourceVm.ResourceGroupName -SnapshotName $snapshotName -Snapshot $snapshotConfig
+        Write-Verbose "snapshot $snapshotName created"
 
-        Write-Verbose "Creating copy of disk $diskCopyName"
+        Write-Progress -Activity "Moving VM..." -Status "Creating copy of disk $diskCopyName"
         $diskConfig = New-AzDiskConfig -SkuName $_.storageType -Location $sourceVm.Location -Zone $zone -CreateOption Copy -SourceResourceId $snapshot.Id
         $disk = New-AzDisk -ResourceGroupName $sourceVm.ResourceGroupName -DiskName $diskCopyName -Disk $diskConfig
+        Write-Verbose "disk $diskCopyName created"
     }
 }
 #endregion
@@ -261,15 +275,15 @@ if ($Zone -ne $sourceVm.Zones) {
 # attach OS disk
 $osDiskId = $sourceVm.StorageProfile.OsDisk.ManagedDisk.Id + $diskSuffix
 if ($sourceVm.StorageProfile.OsDisk.OsType -eq 'Windows') {
-    Write-Verbose "setting up new VM OS Disk (Windows)"
+    Write-Verbose "setting up OS disk (Windows)"
     $result = Set-AzVMOSDisk -VM $newVm -ManagedDiskId $osDiskId -CreateOption Attach -Windows -Caching $sourceVm.StorageProfile.OsDisk.Caching
 } else {
-    Write-Verbose "setting up new VM OS Disk (Linux)"
+    Write-Verbose "setting up OS disk (Linux)"
     $result = Set-AzVMOSDisk -VM $newVm -ManagedDiskId $osDiskId -CreateOption Attach -Linux -Caching $sourceVm.StorageProfile.OsDisk.Caching
 }
 
 # attach data disks
-Write-Verbose "assigning original Data Disks"
+Write-Verbose "assigning data disks"
 $i = 0
 foreach ($oldDataDisk in $sourceVm.StorageProfile.DataDisks) {
     $diskId = $oldDataDisk.ManagedDisk.Id + $diskSuffix
@@ -283,8 +297,6 @@ try {
     $result = New-AzVM -VM $newVm -ResourceGroupName $ResourceGroupName -Location $sourceVm.Location
     Write-Debug $result
 } catch {
-    Write-Progress -Activity "Failed to move VM!!" -Status "restoring orginal VM $(sourceVm.Name)"
-    $result = New-AzVm -VM $sourceVm.Name -ResourceGroupName $sourceVm.ResourceGroupName -Location $sourceVm.Location
     throw $_
     return
 }
@@ -293,4 +305,4 @@ try {
 Write-Host "VM ($($newVm.Name)) updated"
 $actionsTaken | ForEach-Object {Write-Host $('  - ' + $_) }
 Write-Host "NOTE: Please verify the diagnostic storage account to ensure the logs are written to the proper location."
-Write-Host "      Once successful VM move has been confirmed you can remove the orignal disk and snapshots."
+Write-Host "      Once successful VM move has been confirmed you can remove orignal disk and snapshots, if copies were make due to changes in zone, etc"
