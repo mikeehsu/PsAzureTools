@@ -40,6 +40,13 @@ function Invoke-AzRestMethod {
         $Body
     )
 
+    $headers = @{
+        'Content-Type'  = 'application/json';
+        'Authorization' = "Bearer $keypub";
+    }
+
+
+
     process {
         try {
             # construct request body object
