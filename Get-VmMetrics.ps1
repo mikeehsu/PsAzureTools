@@ -70,6 +70,7 @@ param (
     [string] $MetricName = 'Percentage CPU',
 
     [Parameter()]
+    [ValidateSet('Average','Maximum','Minimum','Total', 'Count')]
     [string] $Aggregation = 'Average',
 
     [Parameter()]
@@ -89,6 +90,7 @@ BEGIN {
     }
 
     $script:csvHeader = $false
+    $script:aggregateName = $false
 }
 
 
@@ -197,7 +199,13 @@ PROCESS {
         # output CSV text
         $text = $Name
         foreach ($data in $vmMetrics.value.timeseries.data) {
-            $text += $Delimiter + $data.average
+            if (-not $script:aggregateName) {
+                $property = $data | Get-Member -MemberType NoteProperty | Where-Object {$_.Name -ne 'timeStamp'}
+                if ($property) {
+                    $script:aggregateName = $property.Name
+                }
+            }
+            $text += $Delimiter + $data.$script:aggregateName
         }
         $text | Out-File -FilePath $CSVFilePath -Encoding UTF8 -Append
 
