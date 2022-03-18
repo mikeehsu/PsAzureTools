@@ -152,7 +152,7 @@ PROCESS {
         $uri += '&metricNamespace=microsoft.compute%2Fvirtualmachines&autoadjusttimegrain=true&validatedimensions=false'
 
         try {
-            $response = Invoke-AzRestMethod -Path $uri -ErrorAction Stop
+            $response = Invoke-AzRestMethod -Path $uri -Method 'GET' -ErrorAction Stop
         }
         catch [Exception] {
             # catch errors in the connection
