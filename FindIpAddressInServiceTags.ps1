@@ -368,6 +368,7 @@ function SubToBinary {
     return ((-bnot [uint32]0) -shl (32 - $sub))
 }
 
+############################################################
 function NetworkToBinary {
     param (
         [Parameter(Mandatory)]
@@ -479,7 +480,8 @@ foreach ($service in $serviceTags.values) {
             continue
         }
         if ($(IsIpAddressInCIDR -IPAddress $ipaddress -CIDRAddress $addressPrefix)) {
-            [PSCustomObject]@{
+            Write-Verbose "Service: $($service.name) / AddressPrefix: $addressPrefix"
+            [PSCustomObject] @{
                 Name          = $($service.name)
                 Service       = $($service.properties.systemService)
                 Region        = $($service.properties.region)
