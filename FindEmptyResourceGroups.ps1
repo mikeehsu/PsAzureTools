@@ -1,24 +1,31 @@
-# confirm user is logged into subscription
+<#
+.SYNOPSIS
+    This script returns a list of all resource groups that are empty
+
+.DESCRIPTION
+    This script returns a list of all resource groups that are empty in the current subscription.
+
+#>
+
+# check session to make sure if it connected
 try {
-    $result = Get-AzureRmContext -ErrorAction Stop
-    if (! $result.Environment) {
-        Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription context before proceeding."
-        exit
+    $context = Get-AzContext -ErrorAction Stop
+    if (-not $context.Environment) {
+        throw"Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
     }
 
-} catch {
-    Write-Error "Please login and set the proper subscription context before proceeding."
-    exit
+}
+catch {
+    throw 'Please login (Connect-AzAccount) and set the proper subscription context before proceeding.'
 }
 
-$definedGroups = Get-AzureRmResourceGroup | Select-Object -Property ResourceGroupName | Sort-Object -Property ResourceGroupname -Unique
-
-$usedGroups = Get-AzureRmResource | Select-Object -Property ResourceGroupName | Sort-Object -Property ResourceGroupname -Unique
-
-$emptyGroups = Compare-Object -ReferenceObject $definedGroups.ResourceGroupName -DifferenceObject $usedGroups.ResourceGroupName
-if ($emptyGroups) {
-    Write-Output "Empty Resource Groups:"
-    Write-Output $emptyGroups.InputObject
-} else {
-    Write-Output "No empty Resource Groups found"
-}
+$query = @"
+ResourceContainers
+| where type != 'microsoft.resources/subscriptions'
+| where subscriptionId == '$($context.Subscription.SubscriptionId)'
+| join kind=leftouter (Resources | summarize resourceCount=count() by resourceGroup) on resourceGroup
+| where isnull(resourceCount)
+| project ResourceGroupName=resourceGroup, Location=location, Tags=tags, ResourceId=id
+"@
+$query
+Search-AzGraph -Query $query -ErrorAction Stop
