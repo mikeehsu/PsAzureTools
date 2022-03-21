@@ -13,11 +13,19 @@ ConvertResourceId -ResourceId $resourceId
 
 .NOTES
 #>
-function ConvertResourceId
+[CmdletBinding()]
+param (
+    [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+    [Alias("Id")]
+    [string] $ResourceId
+)
+
+function Split-AzureResourceId
 {
     [CmdletBinding()]
     param (
-        [Parameter(Position=0, Mandatory, ValueFromPipeline)]
+        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Alias("Id")]
         [string] $ResourceId
     )
 
@@ -34,3 +42,5 @@ function ConvertResourceId
 
     return $resourceObj
 }
+
+Split-AzureResourceId -ResourceId $resourceId
