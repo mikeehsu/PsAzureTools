@@ -455,7 +455,7 @@ Get-Content -Path $filePath -ErrorAction Stop |
                 if ($BatchSize -le 10) {
                     Write-Output $tableData.Rows
                 }
-                throw "Data error on or about row $added-$BatchSize thru $($added)"
+                throw "Data error on or about row $($added-$BatchSize) thru $($added)"
                 return
             } finally {
                 $tableData.Clear()
