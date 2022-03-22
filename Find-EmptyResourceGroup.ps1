@@ -27,5 +27,4 @@ ResourceContainers
 | where isnull(resourceCount)
 | project ResourceGroupName=resourceGroup, Location=location, Tags=tags, ResourceId=id
 "@
-$query
 Search-AzGraph -Query $query -ErrorAction Stop
