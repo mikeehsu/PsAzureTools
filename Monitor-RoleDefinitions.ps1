@@ -1,3 +1,16 @@
+<#
+.SYNOPSIS
+Monitor changes in Role Definitions over time
+
+.DESCRIPTION
+This script will report on changes to Role Definitions. It is designed to run as an Azure Function using a timer trigger.
+Upon each execution, it will retrieve the current role definition and store it in the specified storage account/container.
+If any changes are detected since the previous execution, it will write the changes to a specified storage account/container.
+
+.PARAMETER Timer
+The Azure Function timer parameter.
+#>
+
 # Input bindings are passed in via param block.
 param($Timer)
 
