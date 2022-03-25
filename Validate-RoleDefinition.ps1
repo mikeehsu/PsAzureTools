@@ -27,12 +27,65 @@ BEGIN {
 
     # load all Provider Operations into memory
     Write-Progress 'Reading Provider Operations...'
-    $script:ExistingOperations = [System.Collections.ArrayList]::new()
-    Get-AzProviderOperation -ErrorAction Stop | ForEach-Object { $ExistingOperations += $_.Operation }
+    $ExistingOperations = [System.Collections.ArrayList]::new()
+    if (-not $ExistingOperations) {
+        $ExistingOperations = (Get-AzProviderOperation -ErrorAction Stop).Operation  | Sort-Object
+    }
     Write-Progress -Activity 'Reading Provider Operations...' -Completed
 }
 
 PROCESS {
+    function BinarySearch
+    {
+        [CmdletBinding()]
+        param (
+            [Parameter()]
+            [string] $SearchTerm
+        )
+
+        [int] $low = 0
+        [int] $high = $ExistingOperations.Count - 1
+
+        $altTerm = $searchTerm
+        if ($SearchTerm.IndexOf('/*') -ne -1) {
+            $isWildcard = $true
+            $firstPart = $SearchTerm.Substring(0, $SearchTerm.IndexOf('/*'))
+            $altTerm = $SearchTerm.Replace('/*/', '/')
+        }
+
+        while ($low -le $high) {
+            [int] $mid = $low + (($high - $low) / 2)
+            $checkValue = $ExistingOperations[$mid]
+
+            if ($checkValue -like $SearchTerm) {
+                return
+            }
+
+            if ($checkValue -lt $searchTerm) {
+                $low = $mid + 1
+            } else {
+                $high = $mid - 1
+            }
+        }
+
+        if ($isWildcard) {
+            # check for wildcard match
+            $high = $mid+1
+            if ($high -ge $ExistingOperations.Count) {
+                return -1
+            }
+
+            while ($ExistingOperations[$high].StartsWith($firstPart, 'CurrentCultureIgnoreCase')) {
+                $checkValue = $ExistingOperations[$high]
+                if ($checkValue -like $SearchTerm -or $checkValue -eq $altTerm) {
+                    return $high
+                }
+                $high = $high + 1
+            }
+        }
+
+        return -1
+    }
 
     function GetValidActions
     {
@@ -49,42 +102,26 @@ PROCESS {
                 continue
             }
 
-            $found = $false
-
-            # search for wildcard matches
-            foreach ($operation in $ExistingOperations) {
-                if ($operation -like $action) {
-                    $validActions += $action
-                    $found = $true
-                    break
-                }
+            if ($action.StartsWith('*')) {
+                $validActions += $action
+                continue
             }
 
-            # double check any items with /*/ in the action
-            # items like 'Microsoft.Storage/storageAccounts/*/delete' should match 'Microsoft.Storage/storageAccounts/delete'
-            if (-not $found -and $action -match '/*/') {
-                $actionMinusWildcard = $action.Replace('/*/', '/')
-                foreach ($operation in $ExistingOperations) {
-                    if ($operation -like $actionMinusWildcard) {
-                        $validActions += $action
-                        $found = $true
-                        break
-                    }
-                }
+            $index = BinarySearch $action
+            if ($index -ne -1) {
+                $validActions += $action
+            } else  {
+                Write-Warning "'$action' action not found"
             }
-
-            if (-not $found) {
-                Write-Warning "'$action' action  not found"
-            }
-        }
+       }
 
         return $validActions
     }
 
-    # get validated operations
-    Write-Verbose "checking role...$($Role.Name)"
-    $actions = GetValidActions($Role.Actions)
-    $notActions = GetValidActions($Role.NotActions)
+
+    # Write-Verbose "checking role...$($Role.Name)"
+    $actions = GetValidActions -Actions $Role.Actions
+    $notActions = GetValidActions -Actions $Role.NotActions
 
     # check for differences from the original
     $actionDiff = $null
