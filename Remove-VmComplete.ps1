@@ -49,7 +49,7 @@ function RemoveNetworkSecurityGroupById {
         Write-Verbose "NetworkSecurityGroup $($resourceGroupName) / $($networkSecurityGroupName) is still being used"
     }
     else {
-        Write-Verbose "Removing NetworkSecurityGroup $($resoruceGroupName) / $($networkSecurityGroupName)"
+        Write-Verbose "Removing NetworkSecurityGroup $($resourceGroupName) / $($networkSecurityGroupName)"
         $null = Remove-AzNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Name $networkSecurityGroupName -Force
     }
 
