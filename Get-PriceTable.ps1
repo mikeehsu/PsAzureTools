@@ -62,7 +62,6 @@ if ($Product -eq 'virtualmachines') {
 }
 
 $products = @{}
-$done = $false
 $nextPageLink = $null
 do {
     if ($nextPageLink) {
