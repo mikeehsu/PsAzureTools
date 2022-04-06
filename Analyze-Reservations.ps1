@@ -42,7 +42,7 @@ Param (
     [string] $Delimiter = ',',
 
     [Parameter()]
-    [string] $PriceLocation
+    [string] $PriceLocation = 'USGovVirginia'
 )
 
 Set-StrictMode -Version 3
@@ -175,7 +175,10 @@ if (-not $headerFound) {
 }
 $row = $row.Replace(' ', '')
 $row = $row.Replace('ExtendedCost', 'Cost')
+$row = $row.Replace('ResourceId', 'InstanceId')
+$row = $row.Replace('Quantity', 'ConsumedQuantity')
 $header = $row -Split $Delimiter
+$header
 
 #endregion
 
@@ -191,7 +194,6 @@ Get-Content -Path $filePath -ErrorAction Stop |
 Select-Object -Skip $headerRowCount |
 ConvertFrom-Csv -Delimiter $Delimiter -Header $header |
 ForEach-Object {
-
     $rowCount++
     $row = $_
 
@@ -215,7 +217,7 @@ ForEach-Object {
             $vm.ResourceGroup = $row.'ResourceGroup'
             $vm.Name = Split-Path $row.'InstanceId' -Leaf
             $vm.Location = $row.'ResourceLocation'
-            $vm.Rate = $row.'ResourceRate'
+            # $vm.Rate = $row.'ResourceRate'
 
             # AdditionalInfo
             $additionalInfo = $row.'AdditionalInfo' | ConvertFrom-Json
