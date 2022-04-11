@@ -1,1 +1,5 @@
 .vscode/settings.json
+fileupload/node_modules
+fileupload/dist
+fileupload/package-lock.json
+__azurite*
