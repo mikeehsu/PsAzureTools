@@ -1,0 +1,23 @@
+{
+    "manifest_version": 2,
+    "name": "AzGovReplace",
+    "description": "This extension replaces the default Azure global with the Azure Government endpoints.",
+    "version": "1",
+    "icons": {
+        "16": "azgov_16.png",
+        "48": "azgov_48.png",
+        "128": "azgov_128.png"
+    },
+
+    "content_scripts": [
+        {
+            "matches": [
+                "https://*.microsoft.com/*"
+            ],
+            "js": [
+                "replaceEndpoints.js"
+            ],
+            "run_at": "document_start"
+        }
+    ]
+}
