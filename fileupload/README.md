@@ -1,7 +1,10 @@
 # PsAzureTools > FileUpload
 This code in intended to be deployed into a storage account allowing any person with the link to the Static Website and a SAS token to be able to upload a document into it using a friendly web page.
 
-To deploy, use the following steps:
+One-step deployment:
+* execute the deploy.ps1 Powershell script
+
+To deploy manually, use the following steps:
 * create (or use an existing) a storage account
 * on the storage account, enable Resource Sharing (CORS)
     * set Allow orgins to *
