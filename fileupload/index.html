@@ -5,21 +5,49 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Azure Blob Storage Upload</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.0/css/bulma.min.css">
 </head>
 
 <body>
-  <section class="section">
-    <div class="container">
-      <h1 class="title">Uploading file to: </h1>
-      <pre id="name">...</pre>
-      <br>
-      <label for="image">Choose a file to upload:</label>
-      <input type="file" id="image" name="image" accept="*/*">
-      <br>
-      <label id="message"></label>
+
+  <!-- URL & SAS area -->
+  <section class="hero">
+    <div class="hero-body">
+      <h1 class="title">Uploading file to:</h1>
+      <div class="control box">
+        <strong><label id="url">...</label></strong><br>
+        <label><strong>SAS Key: <input type="text" id="sasKey" size="100"></label>
+      </div>
     </div>
   </section>
+
+  <!-- file selection area -->
+  <div class="columns is-centered">
+    <div class="file is-info is-boxed">
+      <label class="file-label">
+        <input class="file-input" type="file" name="image" id="image">
+        <span class="file-cta">
+          <span class="file-icon">
+            <em class="fas fa-upload"></em>
+          </span>
+          <span class="file-label">
+            Choose a file...
+          </span>
+        </span>
+      </label>
+    </div>
+  </div>
+
+  <!-- message area -->
+  <br>
+  <div class="columns is-centered">
+    <div class="notification is-info is-light ">
+      <strong><label class="has-text-centered" id="message"></label></strong>
+    </div>
+  </div>
+
+  <!-- scripts -->
   <script src="main.js" type="text/javascript"></script>
   <script>
     (async function () {
@@ -35,15 +63,21 @@
         containerName = urlParams.get('container');
       }
 
-      document.querySelector('#name').textContent = `URL: ${url}` + "\n" + `SAS Key: ${sasKey}`;
+      document.querySelector('#url').textContent = `URL: ${url}`;
+      document.querySelector('#sasKey').value = `${sasKey}`;
+
+      // upload the file
       function uploadFile() {
         const file = document.getElementById('image').files[0];
-        blobUpload(file, url, containerName, sasKey);
+        blobUpload(file, url, containerName, document.querySelector('#sasKey').value);
       };
+
+      // link upload action to file selection
       const fileInput = document.getElementById('image');
       fileInput.addEventListener("change", uploadFile);
     }())
   </script>
+
 </body>
 
 </html>
