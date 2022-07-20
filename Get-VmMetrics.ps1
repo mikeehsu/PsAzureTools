@@ -129,7 +129,6 @@ PROCESS {
             [string] $Aggregation = 'Average'
         )
 
-
         $apiVersion = '2019-07-01'
 
         $start = $StartTime.ToUniversalTime().ToString('o')
@@ -174,7 +173,7 @@ PROCESS {
     try {
         if ($PSCmdlet.ParameterSetName -eq 'Id') {
             $Name = Split-Path $Id -Leaf
-            $vmMetrics = Get-Metric -Id $Id -StartTime $StartTime -EndTime $EndTime -IntervalMinutes $IntervalMinutes -MetricName $MetricName -Aggregation $Aggregation -ErrorAction Stop
+            $vmMetrics = Get-AzMetric -ResourceId $Id -StartTime $StartTime -EndTime $EndTime -IntervalMinutes $IntervalMinutes -MetricName $MetricName -Aggregation $Aggregation -ErrorAction Stop
         }
         else {
             $vmMetrics = Get-Metric -SubscriptionId $context.Subscription.Id -ResourceGroupName $ResourceGroupName -Name $Name -StartTime $StartTime -EndTime $EndTime -IntervalMinutes $IntervalMinutes -MetricName $MetricName -Aggregation $Aggregation -ErrorAction Stop
