@@ -88,7 +88,7 @@ $query = "Resources
     | project Id = id, Name = name, fqdn = tostring(dnsConfig.fqdn), ipAddresses = dnsConfig.ipAddresses"
 
 if (Get-Module -ListAvailable -Name 'Az.ResourceGraph') {
-    if (-not (Get-Module -Name 'Az.Module')) {
+    if (-not (Get-Module -Name 'Az.ResourceGraph')) {
         Import-Module Az.ResourceGraph
     }
 
