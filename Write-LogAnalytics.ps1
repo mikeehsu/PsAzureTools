@@ -44,8 +44,9 @@ param(
     [parameter()]
     [string] $TimeStampField
 )
+
 # Create the function to create the authorization signature
-Function BuildSignature ()
+Function BuildSignature
 {
     [CmdletBinding()]
     param (
@@ -65,7 +66,7 @@ Function BuildSignature ()
         [string] $Method,
 
         [Parameter(Mandatory)]
-        [string] $ContentType
+        [string] $ContentType,
 
         [Parameter(Mandatory)]
         [string] $Resource
