@@ -7,18 +7,10 @@ param (
     [string] $ResourceGroupName,
 
     [Parameter()]
-    [string] $TenantName,
-
-    [Parameter()]
-    [switch] $CloudOnlyUsers
+    [string] $TenantName
 )
 
 Set-StrictMode -version 2
-
-if ($CloudOnlyUsers -and -not $TenantName) {
-    Write-Error "You must specify a tenant name when using the -CloudOnlyUsers switch"
-    exit 1
-}
 
 $newUsers = Import-Csv $FileName
 # sample row
@@ -74,10 +66,10 @@ if ($roleErrors) {
 # verify users
 $emailErrors = $false
 foreach ($newUser in $newUsers) {
-    if (-not $newUser.UserName -and $CloudOnlyUsers) {
+    if (-not $newUser.UserName -and $TenantName) {
         $mailName = ($newUser.EmailAddress -split '@')[0]
         if (-not $mailName) {
-            Write-Error "$($newUser.EmailAddress) valid email address is required for cloud only users"
+            Write-Error "$($newUser.EmailAddress) valid email address is required"
             $emailErrors = $true
         }
         $newUser.UserName = $mailName + '@' + $TenantName
@@ -89,6 +81,7 @@ if ($emailErrors) {
     exit 1
 }
 
+exit 1
 
 # create users
 $userError = $false
