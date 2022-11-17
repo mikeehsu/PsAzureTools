@@ -259,7 +259,7 @@ foreach ($newHost in $newHosts) {
 
         if ($currentContext.Subscription.Id -ne $subscriptionId) {
             Write-Verbose "Setting subscription context ($subscriptionId)"
-            $context = Get-AzContext -ListAvailable | Where-Object { $_.Subscription.Id -eq $subscriptionId }
+            $context = Get-AzContext -ListAvailable | Where-Object { $_.Subscription -and $_.Subscription.Id -eq $subscriptionId }
             if (-not $context) {
                 Write-Error "SubscriptionId $wvdSubscriptionId not available in current context. Please provide WVD_HOSTS_APPLICATIONID, WVD_HOSTS_TENANTID, WVD_HOSTS_PASSWORD and WVD_HOSTS_ENVIRONMENT necessary for connection"
                 return
