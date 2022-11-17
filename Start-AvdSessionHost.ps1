@@ -14,6 +14,9 @@ Name of the Host Pool
 .PARAMETER Utilization
 Utilization limit of host pool. If utilization of the pool exceeds the amount specified, an existing session host in the pool will be started. Default utilization is 80%.
 
+.PARAMETER MinimumHostCount
+Number of active VMs to have running.
+
 .EXAMPLE
 .\Start-AvdSessionHost.ps1 -ResourceGroupName 'My-ResourceGroup' -Name 'My-HostPool' -Utilization 0.50
 
@@ -30,37 +33,47 @@ param (
     [string] $HostPoolName,
 
     [Parameter(Mandatory)]
-    [float] $Utilization = 0.80
+    [float] $Utilization = 0.80,
+
+    [Parameter()]
+    [float] $MinimumHostCount = 1
 )
 
-# parse ResourceGroupName and Name from resource
-function GetResourceGroupAndName {
+Set-StrictMode -Version 3
+
+# parse a specific section from ResourceId
+function GetResourcePartFromId {
 
     param (
         [Parameter(Mandatory)]
-        [string] $ResourceID,
+        [string] $ResourceId,
 
-        [Parameter()]
-        [string] $ResourceType = 'virtualMachines'
+        [Parameter(Mandatory)]
+        [string[]] $Part
     )
 
-    $array = $resourceID.Split('/')
-    $groupIndex = 0..($array.Length - 1) | Where-Object { $array[$_] -eq 'resourceGroups' }
-    $nameIndex = 0..($array.Length - 1) | Where-Object { $array[$_] -eq $ResourceType }
+    $result = @()
 
-    $result = $array[$groupIndex + 1], $array[$nameIndex + 1]
+    $array = $ResourceID.Split('/')
+    foreach ($item in $Part) {
+        $found = 0..($array.Length - 1) | Where-Object { $array[$_] -eq $item }
+        if ($found) {
+            $result += $array[$found + 1]
+        }
+    }
     return $result
 }
+
 
 #
 ##### START PROCESSING #####
 #
 
+
 # load needed modules
 if (-not $(Get-Module -Name Az.DesktopVirtualization)) {
     Import-Module -Name Az.DesktopVirtualization -ErrorAction Stop
 }
-
 
 # check parameters
 if ($Utilization -gt 1) {
@@ -147,7 +160,7 @@ if ($env:WVD_SUBSCRIPTIONID) {
     $wvdSubscriptionId = $env:WVD_SUBSCRIPTIONID
 }
 
-$context = Get-AzContext -ListAvailable | Where-Object { $_.Subscription.Id -eq $wvdSubscriptionId }
+$context = Get-AzContext -ListAvailable | Where-Object { $_.Subscription -and $_.Subscription.Id -eq $wvdSubscriptionId }
 if (-not $context) {
     Write-Error "SubscriptionId $wvdSubscriptionId not available in current context. Please provide WVD_APPLICATIONID, WVD_TENANTID, WVD_PASSWORD and WVD_ENVIRONMENT necessary for connection"
     return
@@ -173,36 +186,50 @@ Write-Host "Host Pool ($ResourceGroupName/$HostPoolName) - $($sessionHosts.Count
 # get utilization stats
 $totalSession = 0
 $availableHosts = $sessionHosts | Where-Object { $_.AllowNewSession -eq $true -and $_.Status -eq 'Available' }
-$availableHostNames = $availableHosts.Name
-Write-Host "Host Pool ($ResourceGroupName/$HostPoolName) - $($availableHosts.Count) active session host(s)"
+if (-not $availableHosts) {
+    $availableHostNames = @()
 
-$activeUserSessions = Get-AzWvdUserSession -ResourceGroupName $ResourceGroupName -HostPoolName $HostPoolName
-| Where-Object { $_.SessionState -eq 'Active' }
-$totalSession = $activeUserSessions.Count
-$maxSession = $availableHosts.Count * $hostPool.MaxSessionLimit
-Write-Verbose "Host Pool ($ResourceGroupName/$HostPoolName) - $totalSession out of $maxSession sessions used"
+    Write-Host 'Host Pool ($ResourceGroupName/$HostPoolName) - No available hosts running.'
 
-# exit if still under utilization percentage
-$currentUtilization = $totalSession / $maxSession
-Write-Host "Current Utilization at $($currentUtilization*100)%. Target utilization $($Utilization*100)%"
-if ($currentUtilization -lt $Utilization) {
-    Write-Host "Host Pool Utilization ($($Utilization*100)%) not met, no host started"
-    return
+    if ($MinimumHostCount -eq 0) {
+        Write-Error 'Unable to get utilization. Please set a MinimumHostCount greater than 0, or start hosts manually'
+        return
+    }
+
+    $newHostsNeeded = $MinimumHostCount
 }
+else {
+    $availableHostNames = $availableHosts.Name
 
-# determine how many VMs needed to bring utilization in line
-$totalHostsNeeded = [Math]::Ceiling($totalSession / ($maxSession * $Utilization))
-$newHostsNeeded = $totalHostsNeeded - $availableHosts.Count
-if ($newHostsNeeded -eq 0) {
-    Write-Host "No additional hosts needed at this time."
-    return
+    Write-Host "Host Pool ($ResourceGroupName/$HostPoolName) - $($availableHosts.Count) active session host(s)"
+
+    $activeUserSessions = Get-AzWvdUserSession -ResourceGroupName $ResourceGroupName -HostPoolName $HostPoolName
+    | Where-Object { $_.SessionState -eq 'Active' }
+    $totalSession = $activeUserSessions.Count
+    $maxSession = $availableHosts.Count * $hostPool.MaxSessionLimit
+    Write-Verbose "Host Pool ($ResourceGroupName/$HostPoolName) - $totalSession out of $maxSession sessions used"
+
+    # exit if still under utilization percentage
+    $currentUtilization = $totalSession / $maxSession
+    Write-Host "Current Utilization at $($currentUtilization*100)%. Target utilization $($Utilization*100)%"
+    if ($currentUtilization -lt $Utilization) {
+        Write-Host "Host Pool Utilization ($($Utilization*100)%) not met, no host started"
+        return
+    }
+
+    # determine how many VMs needed to bring utilization in line
+    $totalHostsNeeded = [Math]::Ceiling($totalSession / ($maxSession * $Utilization))
+    $newHostsNeeded = $totalHostsNeeded - $availableHosts.Count
+    if ($newHostsNeeded -eq 0) {
+        Write-Host 'No additional hosts needed at this time.'
+        return
+    }
+
 }
 Write-Host "$newHostsNeeded additional hosts needed."
 
-
 $newHosts = $sessionHosts
 | Where-Object { $_.AllowNewSession -eq $true -or $_.Status -ne 'Available' -and $availableHostNames -notcontains $_.Name }
-| Select-Object -First $newHostsNeeded
 if ($newHosts.Count -eq 0) {
     Write-Host 'All available hosts already running. Please add more session hosts into pool if needed.'
     return
@@ -216,6 +243,17 @@ elseif ($newHosts.Count -lt $newHostsNeeded) {
 # loop though the VMs
 $startupCount = 0
 foreach ($newHost in $newHosts) {
+    if ($startupCount -ge $newHostsNeeded) {
+        break
+    }
+
+    # skip hosts where health check is failing
+    $failedHealth = $newHost.HealthCheckResult | Where-Object { $_.HealthCheckResult -eq 'HealthCheckFailed' }
+    if ($failedHealth) {
+        Write-Error "$($newHost.Name) is in an unhealthy condition. Please fix - $($failedHealth.AdditionalFailureDetailMessage)."
+        continue
+    }
+
     try {
         $subscriptionId, $hostVmResourceGroupName, $hostVmName = GetResourcePartFromId -ResourceID $newHost.ResourceId -Part @('subscriptions', 'resourceGroups', 'virtualMachines')
 
@@ -239,8 +277,8 @@ foreach ($newHost in $newHosts) {
         break
     }
 }
+Write-Host "$startupCount session hosts started."
 
 # reset to original context
 $currentContext = Set-AzContext -Context $originalContext
 
-Write-Host "$startupCount session hosts started."

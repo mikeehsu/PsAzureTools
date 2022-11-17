@@ -33,6 +33,8 @@ param (
     [int] $MinimumHostCount = 1
 )
 
+Set-StrictMode -Version 3
+
 # parse ResourceGroupName and Name from resource
 function GetResourcePartFromId {
 
@@ -146,7 +148,7 @@ if ($env:WVD_SUBSCRIPTIONID) {
     $wvdSubscriptionId = $env:WVD_SUBSCRIPTIONID
 }
 
-$context = Get-AzContext -ListAvailable | Where-Object { $_.Subscription.Id -eq $wvdSubscriptionId }
+$context = Get-AzContext -ListAvailable | Where-Object {$_.Subscription -and $_.Subscription.Id -eq $wvdSubscriptionId }
 if (-not $context) {
     Write-Error "SubscriptionId $wvdSubscriptionId not available in current context. Please provide WVD_APPLICATIONID, WVD_TENANTID, WVD_PASSWORD and WVD_ENVIRONMENT necessary for connection"
     return
@@ -162,8 +164,13 @@ if (-not $sessionHosts) {
 
 # filter down to available hosts
 $availableHosts = $sessionHosts | Where-Object { $_.AllowNewSession -eq $true -and $_.Status -eq 'Available' }
+if (-not $availableHosts) {
+    Write-Host "No sessions hosts available, skipping shutdown."
+    return
+}
+
 if ($availableHosts.Count -le $MinimumHostCount) {
-    Write-Host "Only $($availableHosts.Count) sessions hosts currently available, skipping shutdown."
+    Write-Host "Only $($availableHosts.Count) sessions hosts available, skipping shutdown."
     return
 }
 
