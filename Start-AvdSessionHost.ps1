@@ -242,6 +242,7 @@ elseif ($newHosts.Count -lt $newHostsNeeded) {
 
 # loop though the VMs
 $startupCount = 0
+$unhealthyHostCount = 0
 foreach ($newHost in $newHosts) {
     if ($startupCount -ge $newHostsNeeded) {
         break
@@ -251,6 +252,7 @@ foreach ($newHost in $newHosts) {
     $failedHealth = $newHost.HealthCheckResult | Where-Object { $_.HealthCheckResult -eq 'HealthCheckFailed' }
     if ($failedHealth) {
         Write-Error "$($newHost.Name) is in an unhealthy condition. Please fix - $($failedHealth.AdditionalFailureDetailMessage)."
+        $unhealthyHostCount++
         continue
     }
 
@@ -278,6 +280,10 @@ foreach ($newHost in $newHosts) {
     }
 }
 Write-Host "$startupCount session hosts started."
+
+if ($unhealthyHostCount) {
+    Write-Warning "$unhealthyHostCount unhealthy session hosts. Please fix unhealthy hosts to increase pool availability."
+}
 
 # reset to original context
 $currentContext = Set-AzContext -Context $originalContext
