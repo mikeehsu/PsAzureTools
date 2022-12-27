@@ -189,7 +189,7 @@ $availableHosts = $sessionHosts | Where-Object { $_.AllowNewSession -eq $true -a
 if (-not $availableHosts) {
     $availableHostNames = @()
 
-    Write-Host 'Host Pool ($ResourceGroupName/$HostPoolName) - No available hosts running.'
+    Write-Host "Host Pool ($ResourceGroupName/$HostPoolName) - No available hosts running."
 
     if ($MinimumHostCount -eq 0) {
         Write-Error 'Unable to get utilization. Please set a MinimumHostCount greater than 0, or start hosts manually'
@@ -198,34 +198,62 @@ if (-not $availableHosts) {
 
     $newHostsNeeded = $MinimumHostCount
 }
+elseif ($sessionHosts.Count -lt $MinimumHostCount) {
+    Write-Host "MinimumHostCount of $MinimumHostsount not met."
+    $newHostsNeeded = $MinimumHostCount - $sessionHosts.Count
+
+}
 else {
+
     $availableHostNames = $availableHosts.Name
 
     Write-Host "Host Pool ($ResourceGroupName/$HostPoolName) - $($availableHosts.Count) active session host(s)"
 
     $activeUserSessions = Get-AzWvdUserSession -ResourceGroupName $ResourceGroupName -HostPoolName $HostPoolName
     | Where-Object { $_.SessionState -eq 'Active' }
-    $totalSession = $activeUserSessions.Count
-    $maxSession = $availableHosts.Count * $hostPool.MaxSessionLimit
-    Write-Verbose "Host Pool ($ResourceGroupName/$HostPoolName) - $totalSession out of $maxSession sessions used"
 
-    # exit if still under utilization percentage
-    $currentUtilization = $totalSession / $maxSession
-    Write-Host "Current Utilization at $($currentUtilization*100)%. Target utilization $($Utilization*100)%"
-    if ($currentUtilization -lt $Utilization) {
-        Write-Host "Host Pool Utilization ($($Utilization*100)%) not met, no host started"
+
+    if ($hostPool.LoadBalancerType -eq 'BreadthFirst') {
+        # BreadthFirst check overall utilization of pool
+        $totalSession = $activeUserSessions.Count
+        $maxSession = $availableHosts.Count * $hostPool.MaxSessionLimit
+        Write-Verbose "Host Pool ($ResourceGroupName/$HostPoolName) - $totalSession out of $maxSession sessions used"
+
+        # exit if still under utilization percentage
+        $currentUtilization = $totalSession / $maxSession
+        Write-Host "Current Utilization at $($currentUtilization*100)%. Target utilization $($Utilization*100)%"
+        if ($currentUtilization -lt $Utilization) {
+            Write-Host "Host Pool Utilization ($($Utilization*100)%) not met, no host started"
+            return
+        }
+
+        # determine how many VMs needed to bring utilization in line
+        $totalHostsNeeded = [Math]::Ceiling($totalSession / ($maxSession * $Utilization))
+        $newHostsNeeded = $totalHostsNeeded - $availableHosts.Count
+        if ($newHostsNeeded -eq 0) {
+            Write-Host 'No additional hosts needed at this time.'
+            return
+        }
+
+    }
+    elseif ($hostPool.LoadBalancerType -eq 'DepthFirst') {
+        # DepthFirst - make sure at least one host has lower than specified utilization
+        foreach ($availableHost in $availableHosts) {
+            $hostSessions = $activeUserSessions | Where-Object { $_.Id.StartsWith($availableHost.Id) }
+            if ($hostSessions.Count -lt ($Utilization * $hostPool.MaxSessionLimit)) {
+                Write-Host 'No additional hosts needed at this time.'
+                return
+            }
+        }
+        $newHostsNeeded = 1
+
+    }
+    else {
+        Write-Error "Invalid LoadBalancerType - $($hostPool.LoadBalancerType) for Host Pool ($ResourceGroupName/$HostPoolName)"
         return
     }
-
-    # determine how many VMs needed to bring utilization in line
-    $totalHostsNeeded = [Math]::Ceiling($totalSession / ($maxSession * $Utilization))
-    $newHostsNeeded = $totalHostsNeeded - $availableHosts.Count
-    if ($newHostsNeeded -eq 0) {
-        Write-Host 'No additional hosts needed at this time.'
-        return
-    }
-
 }
+
 Write-Host "$newHostsNeeded additional hosts needed."
 
 $newHosts = $sessionHosts
