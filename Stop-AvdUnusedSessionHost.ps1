@@ -220,8 +220,7 @@ foreach ($unusedHost in $unusedHosts) {
         break
     }
 }
+Write-Host "$shutdownCount session host(s) shutdown."
 
 # reset to original context
 $currentContext = Set-AzContext -Context $originalContext
-
-Write-Host "$shutdownCount session host(s) shutdown."
