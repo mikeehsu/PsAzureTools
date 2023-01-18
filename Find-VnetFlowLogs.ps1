@@ -58,19 +58,19 @@ param (
 try {
     $context = Get-AzContext -ErrorAction Stop
     if (-not $context.Environment) {
-        Write-Error "Please login (Connect-AzAccount) and set the proper subscription (Select-AzSubscription) context before proceeding."
+        Write-Error 'Please login (Connect-AzAccount) and set the proper subscription (Select-AzSubscription) context before proceeding.'
         return
     }
 
 }
 catch {
-    Write-Error "Please login (Connect-AzAccount) and set the proper subscription (Select-AzSubscription) context before proceeding."
+    Write-Error 'Please login (Connect-AzAccount) and set the proper subscription (Select-AzSubscription) context before proceeding.'
     return
 }
 
 $tempFile = New-TemporaryFile
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
 $storageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName
 
@@ -106,6 +106,8 @@ if ($EndDate) {
 class TupleClass {
     [datetime] $timestamp
     [double] $unixTimestamp
+    [string] $rule
+    [string] $macAddress
     [int] $order
     [string] $sourceIp
     [string] $destinationIp
@@ -114,7 +116,14 @@ class TupleClass {
     [string] $protocol
     [string] $trafficFlow
     [string] $trafficDecision
+    [string] $flowState
+    [int] $packetsFromSource
+    [int] $bytesFromSource
+    [int] $packetsFromDestination
+    [int] $bytesFromDestination
 }
+
+$unixEpoch = (Get-Date 01.01.1970)
 
 $tupleList = [System.Collections.ArrayList]::New()
 $order = 0
@@ -128,29 +137,51 @@ foreach ($blob in $blobs) {
         # Write-Host $blob.name
         try {
             $null = $blob | Get-AzStorageBlobContent -Destination $tempFile -Force
-        } catch {
+        }
+        catch {
             try {
                 $tempFile = New-TemporaryFile
                 $null = $blob | Get-AzStorageBlobContent -Destination $tempFile -Force
-            } catch {
+            }
+            catch {
                 throw $_
             }
         }
 
-        # Write-Progress -Activity "Processing $storageAccountName/$ContainerName" -Status $blob.Name
+        Write-Verbose "Processing $($blob.Name)"
 
         $data = Get-Content $tempFile | ConvertFrom-Json
-        foreach ($row in $data.records.properties.flows.flows.flowTuples) {
-            if ($row -like "*$ipAddress*") {
-                $order = $order + 1
-                $tuple = [TupleClass]::New()
-                $tuple.unixTimestamp, $tuple.sourceIp, $tuple.destinationIp, $tuple.sourcePort, $tuple.destinationPort, $tuple.protocol, $tuple.trafficFlow, $tuple.trafficDecision = $row -split ','
-                $tuple.timestamp =  (Get-Date 01.01.1970)+([System.TimeSpan]::fromseconds($tuple.unixtimestamp))
-                $tuple.order = $order
-                $null = $tupleList.Add($tuple)
+        foreach ($record in $data.records) {
+
+            if (-not $record.properties.flows) {
+                continue
             }
+
+            foreach ($flow in $record.properties.flows) {
+
+                if (-not $flow.flows.flowTuples) {
+                    continue
+                }
+
+                foreach ($row in $flow.flows.flowTuples) {
+                    if ($row -like "*$ipAddress*") {
+                        $order = $order + 1
+                        $tuple = [TupleClass]::New()
+                        $tuple.rule = $flow.rule
+                        $tuple.macAddress = $flow.flows.mac
+                        $tuple.unixTimestamp, $tuple.sourceIp, $tuple.destinationIp, $tuple.sourcePort, $tuple.destinationPort, $tuple.protocol, $tuple.trafficFlow, $tuple.trafficDecision, $tuple.flowState, $tuple.packetsFromSource, $tuple.bytesFromSource, $tuple.packetsFromDestination, $tuple.bytesFromDestination = $row -split ','
+                        $tuple.timestamp = $unixEpoch + ([System.TimeSpan]::fromseconds($tuple.unixtimestamp))
+                        $tuple.order = $order
+                        $null = $tupleList.Add($tuple)
+                    }
+                }
+            }
+
+            Write-Progress -Activity "Searching for $ipAddress" -Status "$order matches found"
         }
     }
 }
+
+Write-Progress "Searching for $ipAddress" -Completed
 
 $tupleList
