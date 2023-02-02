@@ -18,7 +18,7 @@ Environment to search in. If an environment is not provided the current environm
 FindIpAddressInServiceTags.ps1 40.90.23.208
 
 .EXAMPLE
-FindIpAddressInServiceTags.ps1 40.90.23.208 -UseAPI
+Find-IpAddressInServiceTags.ps1 40.90.23.208 -UseAPI
 #>
 
 [CmdletBinding()]
