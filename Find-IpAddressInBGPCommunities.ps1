@@ -3,22 +3,14 @@
 Search Service Tags for an IP Address
 
 .DESCRIPTION
-Searches through the Sevice Tag listings for a specific IP Address.
+Searches through the BGP Communities for a specific IP Address.
 
 .PARAMETER IPAddress
 IP Address to search for
 
-.PARAMETER UseAPI
-If specified, the script will retrieve the Service Tags from the new Powershell SDK using your current Azure subscription context. The default is to search through the weekly Service Tags file publications at: https://docs.microsoft.com/en-us/azure/virtual-network/security-overview#service-tags-in-on-premises
-
-.PARAMETER Environment
-Environment to search in. If an environment is not provided the current environment in context is used.
-
 .EXAMPLE
-FindIpAddressInServiceTags.ps1 40.90.23.208
+Find-IpAddressInBGPCommunities.ps1 40.90.23.208
 
-.EXAMPLE
-Find-IpAddressInServiceTags.ps1 40.90.23.208 -UseAPI
 #>
 
 [CmdletBinding()]
@@ -417,28 +409,28 @@ catch {
 # load the BGP Communities
 $serviceCommunities = Get-AzBgpServiceCommunity
 
-$found = 0
+$foundCommunities = @()
 foreach ($serviceCommunity in $serviceCommunities) {
     Write-Verbose "Checking service: $($serviceCommunity.Name)"
     forEach ($bgpCommunity in $serviceCommunity.BgpCommunities) {
         forEach ($addressPrefix in $bgpCommunity.CommunityPrefixes) {
             if ($(IsIpAddressInCIDR -IPAddress $ipaddress -CIDRAddress $addressPrefix)) {
-                [PSCustomObject] @{
+                $foundCommunities += [PSCustomObject] @{
                     Name                 = $serviceCommunity.name
                     CommunityName        = $bgpCommunity.CommunityName
                     ServiceSupportRegion = $bgpCommunity.ServiceSupportedRegion
                     CommunityValue       = $bgpCommunity.CommunityValue
                     CommunityPrefix      = $addressPrefix
                 }
-                $found++
             }
 
         }
     }
 }
 
-if ($found) {
-    Write-Host "$found entries found"
+if ($foundCommunities) {
+    Write-Verbose "$($foundCommunities.Count) entries found"
+    return $foundCommunities
 }
 else {
     Write-Host 'No entries found'
