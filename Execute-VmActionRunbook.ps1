@@ -318,7 +318,7 @@ foreach ($vm in $vms) {
         # submit a job to perform the action
         $job = Start-AutomationRunbook -Name $automationRunbookName -Parameters $params -ErrorAction Continue
         if ($job) {
-            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) $Action job submitted ($job.guid)"
+            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) $Action job submitted ($job)"
         }
          else {
             Write-Error "$($vm.ResourceGroupName)/$($vm.Name) $Action job submission failed."
