@@ -148,8 +148,12 @@ do {
             }
 
         }
+        elseif ($item.type -eq 'DevTestConsumption') {
+            # placeholder for DevTest pricing to prevent messages
+
+        }
         else {
-            Write-Host "Unknown type=$($item.price)"
+            Write-Host "Unknown type=$($item.type)"
         }
 
     }

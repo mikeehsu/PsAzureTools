@@ -2,4 +2,5 @@
 fileupload/node_modules
 fileupload/dist
 fileupload/package-lock.json
+launch.json
 __azurite*
