@@ -5,7 +5,7 @@ Start or Stop a set of Virtual Macheins.
 .DESCRIPTION
 This script is used to Start, Stop or Shutdown a set of Vms. All item listed in the -Include parameters combine to narrow down the VMs to action on. Any matching criteria listed in the -Exclude will be excluded. Exclusions will take precedence.
 
-If more than one virtual machine is identified, this runbook will queue a job for itself to action each virtual machine individually. An internal variable 'AutomationRunbookName' needs to be set to the RunbookName to queue the jobs.
+If more than one virtual machine is identified, this runbook will queue a job for itself to action each virtual machine individually. If the runbook is named something other than 'Execute-VmActionRunbok', an internal variable 'AutomationRunbookName' needs to be set to the RunbookName to queue the jobs.
 
 .PARAMETER Action
 Start, Stop, Shutdown action to take
@@ -76,7 +76,7 @@ Set-StrictMode -Version 2.0
 $startTime = Get-Date
 
 # convert all string parameters to arrays
-Write-Host '========== PARAMETERS ===================='
+Write-Host '============================== PARAMETERS =============================='
 
 if ($Action) {
     Write-Host "Action: $Action"
@@ -86,30 +86,29 @@ if ($SubscriptionId) {
     Write-Host "SubscriptionId: $SubscriptionId"
 }
 
-if ($IncludeVmNames) {
-    Write-Host 'IncludeVmNames: ' $IncludeVmNames
-    $IncludeVmNames = $IncludeVmNames -Split ','
-}
-
-if ($ExcludeVmNames) {
-    Write-Host 'ExcludeVmNames: ' $ExcludeVmNames
-    $ExcludeVmNames = $ExcludeVmNames -Split ','
-}
-
 if ($IncludeResourceGroupNames) {
+    $IncludeResourceGroupNames = ($IncludeResourceGroupNames -Split ',').Trim().Replace('"','').Replace("'",'')
     Write-Host 'IncludeResourceGroupNames: ' $IncludeResourceGroupNames
-    $IncludeResourceGroupNames = $IncludeResourceGroupNames -Split ','
+}
+
+if ($IncludeVmNames) {
+    [string[]] $IncludeVmNames = ($IncludeVmNames -Split ',').Trim().Replace('"','').Replace("'",'')
+    Write-Host "IncludeVmNames:" $($IncludeVmNames -join ',')
 }
 
 if ($ExcludeResourceGroupNames) {
-    Write-Host 'ExcludeResourceGroupNames: ' $ExcludeResourceGroupNames
-    $ExcludeResourceGroupNames = $ExcludeResourceGroupNames -Split ','
+    $ExcludeResourceGroupNames = ($ExcludeResourceGroupNames -Split ',').Trim().Replace('"','').Replace("'",'')
+    Write-Host 'ExcludeResourceGroupNames: ' $($ExcludeResourceGroupNames -join ',')
+}
+
+if ($ExcludeVmNames) {
+    $ExcludeVmNames = ($ExcludeVmNames -Split ',').Trim().Replace('"','').Replace("'",'')
+    Write-Host 'ExcludeVmNames: ' $($ExcludeVmNames -join ',')
 }
 
 if ($IncludeTags) {
-    Write-Host 'IncludeTags: ' $IncludeTags
     [hashtable[]] $IncludeTags = ($IncludeTags -Split ',').Replace('"', '').Replace("'", '') | ConvertFrom-StringData
-
+    Write-Host 'IncludeTags: ' $($IncludeTags | ConvertToJson)
 }
 
 if ($ExcludeTags) {
@@ -119,7 +118,7 @@ if ($ExcludeTags) {
 
 
 # login to the subscription
-Write-Host '========== Connecting to Azure =========='
+Write-Host '==================== Connecting to Azure ===================='
 
 try {
 
@@ -151,16 +150,17 @@ if (-not $IncludeVmNames -and
     throw 'Must specify at least one -Include criteria'
 }
 
+# select VMs to process
+Write-Host '==================== SELECTING VMs =============================='
+
 # build inclusion expression
 $includeItems = @()
-if ($IncludeVmNames) {
-    [string[]] $IncludeVmNames = ($IncludeVmNames -Split ',').Trim()
-    $includeItems += '($IncludeVmNames -contains $_.Name)'
+if ($IncludeResourceGroupNames) {
+    $includeItems += '($IncludeResourceGroupNames -contains $_.ResourceGroupName)'
 }
 
-if ($IncludeResourceGroupNames) {
-    [string[]] $IncludeResourceGroupNames = ($IncludeResourceGroupNames -Split ',').Trim()
-    $includeItems += '($IncludeResourceGroupNames -contains $_.ResourceGroupName)'
+if ($IncludeVmNames) {
+    $includeItems += '($IncludeVmNames -contains $_.Name)'
 }
 
 if ($IncludeTags) {
@@ -168,7 +168,7 @@ if ($IncludeTags) {
     foreach ($tag in $IncludeTags) {
         $tagCond += '($_.Tags.Keys -ceq "' + $tag.Keys + '" -and $_.Tags["' + $tag.Keys + '"] -like "' + $tag.Values + '")'
     }
-    $includeItems += $tagCond -join ' -or '
+    $includeItems += '(' + $($tagCond -join ' -or ') + ')'
 }
 
 $includeExpr = $includeItems -join ' -and '
@@ -178,18 +178,20 @@ if (-not $includeExpr) {
 
 # build exclusion expression
 $excludeItems = @()
-if ($ExcludeVmNames) {
-    $excludeItems += '($ExcludeVmNames -contains $_.Name)'
-}
-
 if ($ExcludeResourceGroupNames) {
     $excludeItems += '($ExcludeResourceGroupNames -contains $_.ResourceGroupName)'
 }
 
+if ($ExcludeVmNames) {
+    $excludeItems += '($ExcludeVmNames -contains $_.Name)'
+}
+
 if ($ExcludeTags) {
+    $tagCond = @()
     foreach ($tag in $ExcludeTags) {
-        $excludeItems += '($_.Tags.Keys -ceq "' + $tag.Keys + '" -and $_.Tags["' + $tag.Keys + '"] -like "' + $tag.Values + '")'
+        $tagCond += '($_.Tags.Keys -ceq "' + $tag.Keys + '" -and $_.Tags["' + $tag.Keys + '"] -like "' + $tag.Values + '")'
     }
+    $excludeItems += '(' + $($tagCond -join ' -or ') + ')'
 }
 
 $excludeExpr = $excludeItems -join ' -or '
@@ -198,9 +200,7 @@ if (-not $excludeExpr) {
 }
 
 
-# select VMs to process
-Write-Host '========== SELECTING VMs ===================='
-
+# execute VM query
 try {
     $cmd = "Get-AzVm -Status | Where-Object { ($includeExpr) -and -not ($excludeExpr) }"
 
@@ -229,7 +229,7 @@ Write-Host "VMs to $($Action): $($vms.Name -join ', ')"
 # if not array, only one VM found
 if ($vms -isnot [array]) {
 
-    Write-Host "========== EXECUTING $action =========="
+    Write-Host "==================== EXECUTING $action =========="
 
     $vm = $vms | Get-AzVM
     if (-not $vm) {
@@ -271,7 +271,11 @@ if ($vms -isnot [array]) {
     return
 }
 
-$automationRunbookName = Get-AutomationVariable -Name 'AutomationRunbookName'
+
+$automationRunbookName = Get-AutomationVariable -Name 'AutomationRunbookName' -ErrorAction SilentlyContinue
+if (! $automationRUnbookName) {
+    $automationRUnbookName = 'Execute-VmActionRunbook'
+}
 
 Write-Host "========= CREATING JOBS for $Action =========="
 Write-Host "Automation RunbookName: $($automationRunbookName)"
@@ -316,7 +320,7 @@ foreach ($vm in $vms) {
         }
 
         # submit a job to perform the action
-        $job = Start-AutomationRunbook -Name $automationRunbookName -Parameters $params -ErrorAction Continue
+        $job = Start-AutomationRunbook -Name -Parameters $params -ErrorAction Continue
         if ($job) {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) $Action job submitted ($job)"
         }
