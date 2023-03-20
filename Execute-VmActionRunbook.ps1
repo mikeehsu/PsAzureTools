@@ -293,21 +293,21 @@ Write-Host "Automation RunbookName: $($automationRunbookName)"
 foreach ($vm in $vms) {
     if ($Action -eq 'Start') {
         if ($vm.PowerState -eq 'VM Running') {
-            Write-Host "$($vm.Name) no action required,$($vm.Powerstate)."
+            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) no action required,$($vm.Powerstate)."
             continue
         }
 
     }
     elseif ($Action -eq 'Shutdown') {
         if ($vm.PowerState -eq 'VM deallocated' -or $vm.PowerState -eq 'VM stopped') {
-            Write-Host "$($vm.Name) no action required, $($vm.Powerstate)"
+            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) no action required, $($vm.Powerstate)"
             continue
         }
 
     }
     elseif ($Action -eq 'Stop') {
         if ($vm.PowerState -eq 'VM deallocated') {
-            Write-Host "$($vm.Name) no action required, $($vm.Powerstate)."
+            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) no action required, $($vm.Powerstate)."
             continue
         }
 
@@ -317,7 +317,7 @@ foreach ($vm in $vms) {
     }
 
     if ($WhatIf) {
-        Write-Host "WhatIf: Would have $($Action) VM $($vm.Name)"
+        Write-Host "WHATIF: Would have submitted job to $Action VM $($vm.ResourceGroupName)/$($vm.Name)"
         continue
     }
 
