@@ -65,7 +65,7 @@ Param (
     [string] $ExcludeTags,
 
     [Parameter(Mandatory = $false)]
-    [switch] $Whatif
+    [boolean] $Whatif = $false
 )
 
 
@@ -245,23 +245,23 @@ if ($vms -isnot [array]) {
     try {
         if ($Action -eq 'Start') {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) starting..."
-            $vm | Start-AzVM
+            $vm | Start-AzVM -WhatIf:$WhatIf
 
         }
         elseif ($Action -eq 'Stop') {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) stopping..."
-            $vm | Stop-AzVM -Force
+            $vm | Stop-AzVM -Force -WhatIf:$WhatIf
 
         }
         elseif ($Action -eq 'Shutdown') {
             if ($vm.StorageProfile.OsDisk.OsType -eq 'Windows') {
                 Write-Host "$($vm.ResourceGroupName)/$($vm.Name) (windows) shutting down ..."
-                $vm | Invoke-AzVMRunCommand -CommandId RunPowerShellScript -ScriptString 'Stop-Computer -ComputerName localhost -Force'
+                $vm | Invoke-AzVMRunCommand -CommandId RunPowerShellScript -ScriptString 'Stop-Computer -ComputerName localhost -Force' -WhatIf:$WhatIf
 
             }
             elseif ($vm.StorageProfile.OsDisk.OsType -eq 'Linux') {
                 Write-Host "$($vm.ResourceGroupName)/$($vm.Name) (linux) shutting down..."
-                $vm | Invoke-AzVMRunCommand -CommandId RunShellScript -ScriptString 'shutdown'
+                $vm | Invoke-AzVMRunCommand -CommandId RunShellScript -ScriptString 'shutdown' -WhatIf:$WhatIf
 
             }
             else {
@@ -316,11 +316,6 @@ foreach ($vm in $vms) {
         throw "Invalid action ($Action)"
     }
 
-    if ($WhatIf) {
-        Write-Host "WHATIF: Would have submitted job to $Action VM $($vm.ResourceGroupName)/$($vm.Name)"
-        continue
-    }
-
     try {
         $params = @{
             'Action'                    = $Action;
@@ -330,6 +325,11 @@ foreach ($vm in $vms) {
         }
 
         # submit a job to perform the action
+        if ($WhatIf) {
+            Write-Host "What If: submitting job to $Action VM $($vm.ResourceGroupName)/$($vm.Name)"
+            continue
+        }
+
         $job = Start-AutomationRunbook -Name $automationRunbookName -Parameters $params -ErrorAction Continue
         if ($job) {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) $Action job submitted ($job)"
