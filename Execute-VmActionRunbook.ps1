@@ -324,6 +324,7 @@ foreach ($vm in $vms) {
     try {
         $params = @{
             'Action'                    = $Action;
+            'SubscriptionId'            = $context.Subscription.Id;
             'IncludeResourceGroupNames' = $vm.ResourceGroupName;
             'IncludeVmNames'            = $vm.Name
         }
