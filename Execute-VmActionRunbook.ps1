@@ -29,7 +29,7 @@ List of Virtual Machine Names to exclude
 List of tags and tag values to exclude in the action
 
 .EXAMPLE
-.\StartStopVm.ps1 -IncludeResourceGroupNames 'dev-rg, test-rg' -IncludeTags = 'ENIVRONMENT = "DEV", ENVIRONMENT = "TEST", -ExcludeVmNames 'my-db'
+.\Execute-VmActionRunbook.ps1 -IncludeResourceGroupNames 'dev-rg, test-rg' -IncludeTags = 'ENIVRONMENT = "DEV", ENVIRONMENT = "TEST", -ExcludeVmNames 'my-db'
 
 .NOTES
 #>
@@ -71,6 +71,10 @@ Param (
 
 #######################################################################
 ## MAIN
+
+#requires -Module Az.Accounts
+#requires -Module Az.Compute
+
 Set-StrictMode -Version 2.0
 
 $startTime = Get-Date
@@ -87,32 +91,32 @@ if ($SubscriptionId) {
 }
 
 if ($IncludeResourceGroupNames) {
-    $IncludeResourceGroupNames = ($IncludeResourceGroupNames -Split ',').Trim().Replace('"','').Replace("'",'')
-    Write-Host 'IncludeResourceGroupNames: ' $IncludeResourceGroupNames
+    [string[]] $IncludeResourceGroupNames = ($IncludeResourceGroupNames -Split ',').Trim().Replace('"', '').Replace("'", '')
+    Write-Host 'IncludeResourceGroupNames: ' $($IncludeResourceGroupNames -join ',')
 }
 
 if ($IncludeVmNames) {
-    [string[]] $IncludeVmNames = ($IncludeVmNames -Split ',').Trim().Replace('"','').Replace("'",'')
-    Write-Host "IncludeVmNames:" $($IncludeVmNames -join ',')
+    [string[]] $IncludeVmNames = ($IncludeVmNames -Split ',').Trim().Replace('"', '').Replace("'", '')
+    Write-Host 'IncludeVmNames:' $($IncludeVmNames -join ',')
+}
+
+if ($IncludeTags) {
+    Write-Host "IncludeTags: $IncludeTags"
+    [hashtable[]] $IncludeTags = ($IncludeTags -Split ',').Replace('"', '').Replace("'", '') | ConvertFrom-StringData
 }
 
 if ($ExcludeResourceGroupNames) {
-    $ExcludeResourceGroupNames = ($ExcludeResourceGroupNames -Split ',').Trim().Replace('"','').Replace("'",'')
+    [string[]] $ExcludeResourceGroupNames = ($ExcludeResourceGroupNames -Split ',').Trim().Replace('"', '').Replace("'", '')
     Write-Host 'ExcludeResourceGroupNames: ' $($ExcludeResourceGroupNames -join ',')
 }
 
 if ($ExcludeVmNames) {
-    $ExcludeVmNames = ($ExcludeVmNames -Split ',').Trim().Replace('"','').Replace("'",'')
+    [string[]] $ExcludeVmNames = ($ExcludeVmNames -Split ',').Trim().Replace('"', '').Replace("'", '')
     Write-Host 'ExcludeVmNames: ' $($ExcludeVmNames -join ',')
 }
 
-if ($IncludeTags) {
-    [hashtable[]] $IncludeTags = ($IncludeTags -Split ',').Replace('"', '').Replace("'", '') | ConvertFrom-StringData
-    Write-Host 'IncludeTags: ' $($IncludeTags | ConvertToJson)
-}
-
 if ($ExcludeTags) {
-    Write-Host 'ExcludeTags: ' $ExcludeTags
+    Write-Host "ExcludeTags: $ExcludeTags"
     [hashtable[]] $ExcludeTags = ($ExcludeTags -Split ',').Replace('"', '').Replace("'", '') | ConvertFrom-StringData
 }
 
@@ -121,22 +125,22 @@ if ($ExcludeTags) {
 Write-Host '==================== Connecting to Azure ===================='
 
 try {
+    $context = Get-AzContext
+    if (-not $context) {
+        # Ensures you do not inherit an AzContext in your runbook
+        $results = Disable-AzContextAutosave -Scope Process
 
-    # Ensures you do not inherit an AzContext in your runbook
-    $results = Disable-AzContextAutosave -Scope Process
-
-    # Connect to Azure with system-assigned managed identity
-    $connection = Connect-AzAccount -Environment AzureUSGovernment -Identity -ErrorAction Stop
-    Write-Host "Connected as $($connection.Context.Account.Id)"
+        # Connect to Azure with system-assigned managed identity
+        $connection = Connect-AzAccount -Environment AzureUSGovernment -Identity -ErrorAction Stop
+        $context = $connection.context
+        Write-Host "New connection as $($context.Account.Id)"
+    }
 
     if ($SubscriptionId) {
         $context = Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction Stop
     }
-    else {
-        $context = Get-AzContext -ErrorAction Stop
-    }
 
-    Write-Host "Connection to subcription $($context.Subscription.Id) established"
+    Write-Host "Subcription set to: $($context.Subscription.Id) established"
 }
 catch {
     Write-Error "Unable to Connect-AzAccount to Subscription ($SubscriptionId) using Managed Identity"
@@ -241,29 +245,34 @@ if ($vms -isnot [array]) {
     try {
         if ($Action -eq 'Start') {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) starting..."
-            $vm | Start-Azvm
+            $vm | Start-AzVM
 
-        } elseif ($Action -eq 'Stop') {
+        }
+        elseif ($Action -eq 'Stop') {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) stopping..."
-            $vm | Stop-AzVm -Force
+            $vm | Stop-AzVM -Force
 
-        } elseif ($Action -eq 'Shutdown') {
+        }
+        elseif ($Action -eq 'Shutdown') {
             if ($vm.StorageProfile.OsDisk.OsType -eq 'Windows') {
                 Write-Host "$($vm.ResourceGroupName)/$($vm.Name) (windows) shutting down ..."
-                $vm | Invoke-AzVmRunCommand -CommandId RunPowerShellScript -ScriptString 'Stop-Computer -ComputerName localhost -Force'
+                $vm | Invoke-AzVMRunCommand -CommandId RunPowerShellScript -ScriptString 'Stop-Computer -ComputerName localhost -Force'
 
-            } elseif ($vm.StorageProfile.OsDisk.OsType -eq 'Linux') {
+            }
+            elseif ($vm.StorageProfile.OsDisk.OsType -eq 'Linux') {
                 Write-Host "$($vm.ResourceGroupName)/$($vm.Name) (linux) shutting down..."
-                $vm | Invoke-AzVmRunCommand -CommandId RunShellScript -ScriptString 'shutdown'
+                $vm | Invoke-AzVMRunCommand -CommandId RunShellScript -ScriptString 'shutdown'
 
-            } else {
+            }
+            else {
                 Write-Error "$ResourceGroupName/$VName unable to $Action."
                 throw "unsupported OsTYpe ($($vm.StorageProfile.OsDisk.OsType))."
                 return
             }
         }
 
-    } catch {
+    }
+    catch {
         throw $_
     }
 
@@ -271,34 +280,34 @@ if ($vms -isnot [array]) {
     return
 }
 
-
+# get name of AutomationRunbook
 $automationRunbookName = Get-AutomationVariable -Name 'AutomationRunbookName' -ErrorAction SilentlyContinue
-if (! $automationRUnbookName) {
+if (-not $automationRunbookName) {
     $automationRUnbookName = 'Execute-VmActionRunbook'
 }
 
-Write-Host "========= CREATING JOBS for $Action =========="
+Write-Host "========= SUBMITTING JOBS for $Action =========="
 Write-Host "Automation RunbookName: $($automationRunbookName)"
 
 # submit job to perform action
 foreach ($vm in $vms) {
     if ($Action -eq 'Start') {
         if ($vm.PowerState -eq 'VM Running') {
-            Write-Host "$($vm.Name) is already running."
+            Write-Host "$($vm.Name) no action required,$($vm.Powerstate)."
             continue
         }
 
     }
     elseif ($Action -eq 'Shutdown') {
         if ($vm.PowerState -eq 'VM deallocated' -or $vm.PowerState -eq 'VM stopped') {
-            Write-Host "$($vm.Name) is already shutdown."
+            Write-Host "$($vm.Name) no action required, $($vm.Powerstate)"
             continue
         }
 
     }
     elseif ($Action -eq 'Stop') {
         if ($vm.PowerState -eq 'VM deallocated') {
-            Write-Host "$($vm.Name) is already deallocated."
+            Write-Host "$($vm.Name) no action required, $($vm.Powerstate)."
             continue
         }
 
@@ -314,17 +323,17 @@ foreach ($vm in $vms) {
 
     try {
         $params = @{
-            'Action' = $Action;
+            'Action'                    = $Action;
             'IncludeResourceGroupNames' = $vm.ResourceGroupName;
-            'IncludeVmNames' = $vm.Name
+            'IncludeVmNames'            = $vm.Name
         }
 
         # submit a job to perform the action
-        $job = Start-AutomationRunbook -Name -Parameters $params -ErrorAction Continue
+        $job = Start-AutomationRunbook -Name $automationRunbookName -Parameters $params -ErrorAction Continue
         if ($job) {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) $Action job submitted ($job)"
         }
-         else {
+        else {
             Write-Error "$($vm.ResourceGroupName)/$($vm.Name) $Action job submission failed."
         }
     }
