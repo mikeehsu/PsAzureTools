@@ -56,6 +56,10 @@ Param (
     [string] $IncludeTags,
 
     [Parameter(Mandatory = $false)]
+    [ValidateSet('Running', 'Stopped', 'Deallocated', 'VM running', 'VM stopped', 'VM deallocated')]
+    [string] $IncludeVmState,
+
+    [Parameter(Mandatory = $false)]
     [string] $ExcludeResourceGroupNames,
 
     [Parameter(Mandatory = $false)]
@@ -102,7 +106,18 @@ if ($IncludeVmNames) {
 
 if ($IncludeTags) {
     Write-Host "IncludeTags: $IncludeTags"
-    [hashtable[]] $IncludeTags = ($IncludeTags -Split ',').Replace('"', '').Replace("'", '') | ConvertFrom-StringData
+    [hashtable[]] $IncludeTags = ($IncludeTags -Split ',').Replace('"', '').Replace("'", '') | ConvertFrom-StringData -ErrorAction Stop
+    if ($IncludeTags -isnot [array]) {
+        throw "Unable to convert -IncludeTags to hashtable. Check format and try again."
+        return
+    }
+}
+
+if ($IncludeVmState) {
+    if (-not $IncludeVmState.StartsWith('VM')) {
+        $IncludeVmState = "VM $IncludeVmState"
+    }
+    Write-Host "IncludeVmState: $IncludeVmState"
 }
 
 if ($ExcludeResourceGroupNames) {
@@ -120,6 +135,12 @@ if ($ExcludeTags) {
     [hashtable[]] $ExcludeTags = ($ExcludeTags -Split ',').Replace('"', '').Replace("'", '') | ConvertFrom-StringData
 }
 
+# make sure at least one selection parameter is passed in
+if (-not $IncludeVmNames -and
+    -not $IncludeResourceGroupNames -and
+    -not $IncludeTags ) {
+    throw 'Must specify at least one -Include criteria'
+}
 
 # login to the subscription
 Write-Host '==================== Connecting to Azure ===================='
@@ -147,12 +168,6 @@ catch {
     throw $_
 }
 
-# make sure at least one selection parameter is passed in
-if (-not $IncludeVmNames -and
-    -not $IncludeResourceGroupNames -and
-    -not $IncludeTags ) {
-    throw 'Must specify at least one -Include criteria'
-}
 
 # select VMs to process
 Write-Host '==================== SELECTING VMs =============================='
@@ -173,6 +188,10 @@ if ($IncludeTags) {
         $tagCond += '($_.Tags.Keys -ceq "' + $tag.Keys + '" -and $_.Tags["' + $tag.Keys + '"] -like "' + $tag.Values + '")'
     }
     $includeItems += '(' + $($tagCond -join ' -or ') + ')'
+}
+
+if ($IncludeVmState) {
+    $includeItems += '($_.PowerState -eq "' + $IncludeVmState + '")'
 }
 
 $includeExpr = $includeItems -join ' -and '
@@ -233,7 +252,7 @@ Write-Host "VMs to $($Action): $($vms.Name -join ', ')"
 # if not array, only one VM found
 if ($vms -isnot [array]) {
 
-    Write-Host "==================== EXECUTING $action =========="
+    Write-Host "==================== EXECUTING $action ===================="
 
     $vm = $vms | Get-AzVM
     if (-not $vm) {
@@ -286,7 +305,7 @@ if (-not $automationRunbookName) {
     $automationRUnbookName = 'Execute-VmActionRunbook'
 }
 
-Write-Host "========= SUBMITTING JOBS for $Action =========="
+Write-Host "==================== SUBMITTING JOBS for $Action ===================="
 Write-Host "Automation RunbookName: $($automationRunbookName)"
 
 # submit job to perform action
