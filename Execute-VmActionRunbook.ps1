@@ -19,6 +19,9 @@ List of Virtual Machine Names to include
 .PARAMETER IncludeTags
 List of tags and tag values to include in the action
 
+.PARAMETER IncludVmState
+State of VM to include in the action. Only one state can be specified.
+
 .PARAMETER ExcludeResourceGroupNames
 List of resource group names to exclude in the action
 
@@ -29,7 +32,13 @@ List of Virtual Machine Names to exclude
 List of tags and tag values to exclude in the action
 
 .EXAMPLE
-.\Execute-VmActionRunbook.ps1 -IncludeResourceGroupNames 'dev-rg, test-rg' -IncludeTags = 'ENIVRONMENT = "DEV", ENVIRONMENT = "TEST", -ExcludeVmNames 'my-db'
+.\Execute-VmActionRunbook.ps1 -Action 'Start' -IncludeResourceGroupNames 'dev-rg, test-rg'
+
+.EXAMPLE
+.\Execute-VmActionRunbook.ps1 -Action 'Shutdown' -IncludeResourceGroupNames 'dev-rg, test-rg' -IncludeTags = 'ENIVRONMENT = "DEV", ENVIRONMENT = "TEST", -ExcludeVmNames 'my-db'
+
+.EXAMPLE
+.\Execute-VmActionRunbook.ps1 -Action 'Stop'-IncludeResourceGroupNames 'dev-rg, test-rg' -IncludeVmState 'Stopped'
 
 .NOTES
 #>
