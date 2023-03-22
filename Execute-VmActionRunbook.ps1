@@ -31,6 +31,9 @@ List of Virtual Machine Names to exclude
 .PARAMETER ExcludeTags
 List of tags and tag values to exclude in the action
 
+.PARAMETER ExcludeCreatedAfter
+Exclude virtual machines created after a specified prior timespan (e.g. 1d, 1h)
+
 .EXAMPLE
 .\Execute-VmActionRunbook.ps1 -Action 'Start' -IncludeResourceGroupNames 'dev-rg, test-rg'
 
@@ -78,6 +81,9 @@ Param (
     [string] $ExcludeTags,
 
     [Parameter(Mandatory = $false)]
+    [string] $ExcludeCreatedAfter,
+
+    [Parameter(Mandatory = $false)]
     [boolean] $Whatif = $false
 )
 
@@ -92,7 +98,7 @@ Set-StrictMode -Version 2.0
 
 $startTime = Get-Date
 
-# convert all string parameters to arrays
+# validate all parameters, converting types as necessary
 Write-Host '============================== PARAMETERS =============================='
 
 if ($Action) {
@@ -117,7 +123,7 @@ if ($IncludeTags) {
     Write-Host "IncludeTags: $IncludeTags"
     [hashtable[]] $IncludeTags = ($IncludeTags -Split ',').Replace('"', '').Replace("'", '') | ConvertFrom-StringData -ErrorAction Stop
     if ($IncludeTags -isnot [array]) {
-        throw "Unable to convert -IncludeTags to hashtable. Check format and try again."
+        throw 'Unable to convert -IncludeTags to hashtable. Check format and try again.'
         return
     }
 }
@@ -144,6 +150,27 @@ if ($ExcludeTags) {
     [hashtable[]] $ExcludeTags = ($ExcludeTags -Split ',').Replace('"', '').Replace("'", '') | ConvertFrom-StringData
 }
 
+# validate ExcludeCreatedAfter timespan
+if ($ExcludeCreatedAfter) {
+    try {
+        if ($ExcludeCreatedAfter.EndsWith('h')) {
+            $hours = [int] $ExcludeCreatedAfter.Replace('h', '')
+            $ExcludeCreatedAfter = $startTime.AddHours(-$hours)
+        }
+        elseif ($ExcludeCreatedAfter.EndsWith('d')) {
+            $hours = [int] $ExcludeCreatedAfter.Replace('d', '') * 24
+            $ExcludeCreatedAfter = $startTime.AddHours(-$hours)
+        }
+        else {
+            $ExcludeCreatedAfter = [DateTime] $ExcludeCreatedAfter
+        }
+    }
+    catch {
+        throw 'Invalid -ExcludeCreatedAfter value. Must be in the format "##h" (e.g. "24h, 2d"), or a specific datetime'
+    }
+    Write-Host "ExcludeCreatedAfter: $ExcludeCreatedAfter"
+}
+
 # make sure at least one selection parameter is passed in
 if (-not $IncludeVmNames -and
     -not $IncludeResourceGroupNames -and
@@ -151,36 +178,8 @@ if (-not $IncludeVmNames -and
     throw 'Must specify at least one -Include criteria'
 }
 
-# login to the subscription
-Write-Host '==================== Connecting to Azure ===================='
 
-try {
-    $context = Get-AzContext
-    if (-not $context) {
-        # Ensures you do not inherit an AzContext in your runbook
-        $results = Disable-AzContextAutosave -Scope Process
-
-        # Connect to Azure with system-assigned managed identity
-        $connection = Connect-AzAccount -Environment AzureUSGovernment -Identity -ErrorAction Stop
-        $context = $connection.context
-        Write-Host "New connection as $($context.Account.Id)"
-    }
-
-    if ($SubscriptionId) {
-        $context = Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction Stop
-    }
-
-    Write-Host "Subcription set to: $($context.Subscription.Id) established"
-}
-catch {
-    Write-Error "Unable to Connect-AzAccount to Subscription ($SubscriptionId) using Managed Identity"
-    throw $_
-}
-
-
-# select VMs to process
-Write-Host '==================== SELECTING VMs =============================='
-
+# build selection criteria
 # build inclusion expression
 $includeItems = @()
 if ($IncludeResourceGroupNames) {
@@ -226,14 +225,45 @@ if ($ExcludeTags) {
     $excludeItems += '(' + $($tagCond -join ' -or ') + ')'
 }
 
+if ($ExcludeCreatedAfter) {
+    $excludeItems += '( $_.TimeCreated -gt $ExcludeCreatedAfter )'
+}
+
 $excludeExpr = $excludeItems -join ' -or '
 if (-not $excludeExpr) {
     $excludeExpr = '$false'
 }
 
+# login to the subscription
+Write-Host '==================== CONNECTING TO AZURE ===================='
+
+try {
+    $context = Get-AzContext
+    if (-not $context) {
+        # Ensures you do not inherit an AzContext in your runbook
+        $results = Disable-AzContextAutosave -Scope Process
+
+        # Connect to Azure with system-assigned managed identity
+        $connection = Connect-AzAccount -Environment AzureUSGovernment -Identity -ErrorAction Stop
+        $context = $connection.context
+        Write-Host "New connection as $($context.Account.Id)"
+    }
+
+    if ($SubscriptionId) {
+        $context = Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction Stop
+    }
+
+    Write-Host "Subcription set to: $($context.Subscription.Id) established"
+}
+catch {
+    Write-Error "Unable to Connect-AzAccount to Subscription ($SubscriptionId) using Managed Identity"
+    throw $_
+}
 
 # execute VM query
 try {
+    Write-Host '==================== SELECTING VMs ===================='
+
     $cmd = "Get-AzVm -Status | Where-Object { ($includeExpr) -and -not ($excludeExpr) }"
 
     Write-Host 'Selecting Virtual Machines...'
@@ -252,7 +282,7 @@ catch {
 
 if (-not $vms) {
     Write-Host 'No VMs selected.'
-    Write-Host "Script complete. ($('{0:HH:mm:ss}' -f $([datetime] $($(Get-Date) - $startTime).Ticks)) elapsed)"
+    Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
     return
 }
 Write-Host "VMs to $($Action): $($vms.Name -join ', ')"
@@ -266,7 +296,7 @@ if ($vms -isnot [array]) {
     $vm = $vms | Get-AzVM
     if (-not $vm) {
         Write-Error "$($vm.ResourceGroupName)/$($vm.Name) VM not found. Unable to $Action."
-        Write-Host "Script complete. ($('{0:HH:mm:ss}' -f $([datetime] $($(Get-Date) - $startTime).Ticks)) elapsed)"
+        Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
         return
     }
 
@@ -304,14 +334,14 @@ if ($vms -isnot [array]) {
         throw $_
     }
 
-    Write-Host "Script complete. ($('{0:HH:mm:ss}' -f $([datetime] $($(Get-Date) - $startTime).Ticks)) elapsed)"
+    Write-Host Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
     return
 }
 
 # get name of AutomationRunbook
 $automationRunbookName = Get-AutomationVariable -Name 'AutomationRunbookName' -ErrorAction SilentlyContinue
 if (-not $automationRunbookName) {
-    $automationRUnbookName = 'Execute-VmActionRunbook'
+    $automationRunbookName = 'Execute-VmActionRunbook'
 }
 
 Write-Host "==================== SUBMITTING JOBS for $Action ===================="
@@ -372,4 +402,4 @@ foreach ($vm in $vms) {
     }
 }
 
-Write-Host "Script complete. ($('{0:HH:mm:ss}' -f $([datetime] $($(Get-Date) - $startTime).Ticks)) elapsed)"
+Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
