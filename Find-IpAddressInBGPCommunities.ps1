@@ -233,10 +233,12 @@ function CompareSubnet {
     [uint32] $unetwork2 = NetworkToBinary $network2
 
     #Check if subnet length exists and is less then 32(/32 is host, single ip so no calculation needed) if so convert to binary
+    $mask1 = $null
     if ($subnetlen1 -lt 32) {
         [uint32] $mask1 = SubToBinary $subnetlen1
     }
 
+    $mask2 = $null
     if ($subnetlen2 -lt 32) {
         [uint32] $mask2 = SubToBinary $subnetlen2
     }
