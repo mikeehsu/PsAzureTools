@@ -34,6 +34,9 @@ List of tags and tag values to exclude in the action
 .PARAMETER ExcludeCreatedAfter
 Exclude virtual machines created after a specified prior timespan (e.g. 1d, 1h)
 
+.PARAMETER ExcludeStoppedAfter
+Exclude virtual machines that were stopped after a specified prior timespan (e.g. 1d, 1h)
+
 .EXAMPLE
 .\Execute-VmActionRunbook.ps1 -Action 'Start' -IncludeResourceGroupNames 'dev-rg, test-rg'
 
@@ -82,6 +85,9 @@ Param (
 
     [Parameter(Mandatory = $false)]
     [string] $ExcludeCreatedAfter,
+
+    [Parameter(Mandatory = $false)]
+    [string] $ExcludeStoppedAfter,
 
     [Parameter(Mandatory = $false)]
     [boolean] $Whatif = $false
@@ -170,6 +176,28 @@ if ($ExcludeCreatedAfter) {
     }
     Write-Host "ExcludeCreatedAfter: $ExcludeCreatedAfter"
 }
+
+# validate ExcludeStoppedAfter timespan
+if ($ExcludeStoppedAfter) {
+    try {
+        if ($ExcludeStoppedAfter.EndsWith('h')) {
+            $hours = [int] $ExcludeStoppedAfter.Replace('h', '')
+            $ExcludeStoppedAfter = $startTime.AddHours(-$hours)
+        }
+        elseif ($ExcludeStoppedAfter.EndsWith('d')) {
+            $hours = [int] $ExcludeStoppedAfter.Replace('d', '') * 24
+            $ExcludeStoppedAfter = $startTime.AddHours(-$hours)
+        }
+        else {
+            $ExcludeStoppedAfter = [DateTime] $ExcludeStoppedAfter
+        }
+    }
+    catch {
+        throw 'Invalid -ExcludeStoppedAfter value. Must be in the format "##h" (e.g. "24h, 2d"), or a specific datetime'
+    }
+    Write-Host "ExcludeStoppedAfter: $ExcludeStoppedAfter"
+}
+
 
 # make sure at least one selection parameter is passed in
 if (-not $IncludeVmNames -and
@@ -349,6 +377,16 @@ Write-Host "Automation RunbookName: $($automationRunbookName)"
 
 # submit job to perform action
 foreach ($vm in $vms) {
+
+    # exclude if VM has recent stop activity
+    if ($ExcludeStoppedAfter) {
+        $stopActivities = Get-AzActivityLog -ResourceId $vm.Id -StartTime $ExcludeStoppedAfter | Where-Object {$_.OperationName -eq 'Microsoft.Compute/virtualMachines/deallocate/action' -and $_.Status -eq 'Succeeded' }
+        if ($stopActivities) {
+            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) no action required, stopped on $($stopActivities[0].EventTimestamp)."
+            continue
+        }
+    }
+
     if ($Action -eq 'Start') {
         if ($vm.PowerState -eq 'VM Running') {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) no action required,$($vm.Powerstate)."
