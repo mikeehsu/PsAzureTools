@@ -230,9 +230,16 @@ if ($IncludeVmState) {
     $includeItems += '($_.PowerState -eq "' + $IncludeVmState + '")'
 }
 
+if (-not $includeItems) {
+    throw 'Must specify at least one -Include criteria'
+    return
+}
+
+# double-check includeExpr to ensure that it can not be blank
 $includeExpr = $includeItems -join ' -and '
 if (-not $includeExpr) {
-    $includeExpr = '$true'
+    throw 'Error building IncludeExpr, check Include parameters'
+    return
 }
 
 # build exclusion expression
@@ -292,6 +299,11 @@ catch {
 try {
     Write-Host '==================== SELECTING VMs ===================='
 
+    if (-not $includeExpr -or $includeExpr.GetType() -ne [String]) {
+        $includeExpr
+        Write-Error 'Error IncludeExpr should be a string'
+        return
+    }
     $cmd = "Get-AzVm -Status | Where-Object { ($includeExpr) -and -not ($excludeExpr) }"
 
     Write-Host 'Selecting Virtual Machines...'
