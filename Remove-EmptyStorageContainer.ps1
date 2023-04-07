@@ -62,7 +62,7 @@ $deleteCount = 0
 foreach ($container in $containers) {
     try {
         Write-Verbose "Checking container $($container.Name)..."
-        $blobCount = (Get-AzStorageBlob -Container $container.Name -Context $storageAccount.Context).Count
+        $blobCount = (Get-AzStorageBlob -Container $container.Name -Context $storageAccount.Context -ErrorAction Stop).Count
         if ($blobCount -eq 0) {
             # If the container is empty, delete it
             Remove-AzStorageContainer -Name $container.Name -Context $storageAccount.Context
