@@ -1,50 +1,52 @@
-##############################
-#.SYNOPSIS
-# Find and remove any empty Resource Groups
-#
-#.DESCRIPTION
-# Find and remove any empty Resource Groups
-#
-#.PARAMETER Remove
-# Set this parameter to remove the empty resources groups.
-#
-#.EXAMPLE
-# .\RemoveEmptyResourceGroups.ps1 -Remove
-#
-#.NOTES
-#
-##############################
+<#
+.SYNOPSIS
+Removes empty resource groups from the current Azure subscription.
 
-Param (
+.DESCRIPTION
+This script removes any resource groups from the current Azure subscription that do not have any resources tied to them. It then checks for any groups that don't have any resources tied to them, and removes them if the -Force switch is provided.
+
+.PARAMETER Force
+If this switch is provided, the script will remove any empty resource groups without prompting for confirmation.
+
+.EXAMPLE
+Remove-EmptyResourceGroups.ps1 -Force
+Removes all empty resource groups from the current Azure subscription without prompting for confirmation.
+
+.EXAMPLE
+Remove-EmptyResourceGroups.ps1
+Lists all empty resource groups in the current Azure subscription, but does not remove them.
+
+#>
+[CmdletBinding()]
+param (
     [Parameter(Mandatory=$false)]
-    [switch] $Remove
+    [switch] $Force
 )
 
 # confirm user is logged into subscription
 try {
-    $result = Get-AzureRmContext -ErrorAction Stop
-    if (-not $result.Environment) {
-        Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription (Select-AzureRmSubscription) context before proceeding."
+    $result = Get-AzContext -ErrorAction Stop
+    if (-not $result.Subscription) {
+        Write-Error "Please login (Connect-AzAccount) and set the proper subscription (Set-AzContext) context before proceeding."
         exit
     }
-    $azureEnvironmentName = $result.Environment.Name
-
 } catch {
-    Write-Error "Please login (Login-AzureRmAccount) and set the proper subscription (Select-AzureRmSubscription) context before proceeding."
+    Write-Error "Please login (Connect-AzAccount) and set the proper subscription (Set-AzContext) context before proceeding."
     exit
 }
 
 # start processing
-$count = 0
-$emptyGroups = @()
+$stopWatchStart = [System.Diagnostics.Stopwatch]::StartNew()
 
 # get all resources at once to avoid hitting API request limits
 Write-Verbose "Getting all resources..."
-$resources = $(Get-AzureRmResource).ResourceGroupName  | Sort-Object -Unique
+$resources = $(Get-AzResource).ResourceGroupName  | Sort-Object -Unique
+
 Write-Verbose "Getting all Resources Groups..."
-$groups =  $(Get-AzureRmResourceGroup).ResourceGroupName  | Sort-Object
+$groups =  $(Get-AzResourceGroup).ResourceGroupName  | Sort-Object
 
 # check for groups that don't have any resources tied to them
+$emptyGroups = @()
 foreach ($group in $groups) {
     if ($resources -notcontains $group) {
         $emptyGroups += $group
@@ -52,25 +54,31 @@ foreach ($group in $groups) {
 }
 
 if ($emptyGroups.Length -eq 0) {
-    Write-Output 'No empty Resource Groups found.'
+    Write-Host 'No empty Resource Groups found.'
+    Write-Host "Script Complete. $(Get-Date) ($($stopWatchStart.Elapsed.ToString()))"
     return
 }
 
-Write-Output 'Empty Resource Groups:'
+Write-Host 'Empty Resource Groups:'
 $emptyGroups
 
-# if -Remove switch not provided, stop
-if (-not $Remove) {
+# if -Force switch not provided, stop
+if (-not $Force) {
+    Write-Host "Use the -Force switch to remove the empty Resource Groups."
+    Write-Host "Script Complete. $(Get-Date) ($($stopWatchStart.Elapsed.ToString()))"
     return
 }
 
 # execute actual removal of empty resource groups
-Write-Output ""
+Write-Host ""
+$count = 0
 foreach ($group in $emptyGroups) {
     Write-Verbose "Removing $group..."
-    $null = Remove-AzureRmResourceGroup -ResourceGroupName $group -Force -ErrorAction "Stop"
+    $null = Remove-AzResourceGroup -Name $group -Force -ErrorAction "Stop"
+    Write-Host "$group removed."
+
     $count++;
-    Write-Output "$group removed."
 }
 
-Write-Output "Total of $count Resource Groups removed."
+Write-Host "$count resource groups removed."
+Write-Host "Script Complete. $(Get-Date) ($($stopWatchStart.Elapsed.ToString()))"
