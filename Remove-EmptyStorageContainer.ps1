@@ -66,7 +66,7 @@ foreach ($container in $containers) {
         if ($blobCount -eq 0) {
             # If the container is empty, delete it
             Remove-AzStorageContainer -Name $container.Name -Context $storageAccount.Context -ErrorAction Stop
-            Write-Host "$($container.Name) deleted."
+            Write-Host "$($container.Name) container deleted."
             $deleteCount++
         }
     }
