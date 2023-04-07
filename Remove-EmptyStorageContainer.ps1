@@ -55,7 +55,7 @@ $stopWatchStart = [System.Diagnostics.Stopwatch]::StartNew()
 $storageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName -ErrorAction Stop
 
 # Get a list of all containers in the storage account
-$containers = Get-AzStorageContainer -Context $storageAccount.Context
+$containers = Get-AzStorageContainer -Context $storageAccount.Context -ErrorAction Stop
 
 #region - Loop through each container and check if it's empty
 $deleteCount = 0
@@ -65,7 +65,7 @@ foreach ($container in $containers) {
         $blobCount = (Get-AzStorageBlob -Container $container.Name -Context $storageAccount.Context -ErrorAction Stop).Count
         if ($blobCount -eq 0) {
             # If the container is empty, delete it
-            Remove-AzStorageContainer -Name $container.Name -Context $storageAccount.Context
+            Remove-AzStorageContainer -Name $container.Name -Context $storageAccount.Context -ErrorAction Stop
             Write-Host "$($container.Name) deleted."
             $deleteCount++
         }
