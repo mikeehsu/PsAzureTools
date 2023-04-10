@@ -374,7 +374,7 @@ if ($vms -isnot [array]) {
         throw $_
     }
 
-    Write-Host Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
+    Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
     return
 }
 
