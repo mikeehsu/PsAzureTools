@@ -97,9 +97,6 @@ Param (
 #######################################################################
 ## MAIN
 
-#requires -Module Az.Accounts
-#requires -Module Az.Compute
-
 Set-StrictMode -Version 2.0
 
 $startTime = Get-Date
@@ -271,7 +268,6 @@ if (-not $excludeExpr) {
 
 # login to the subscription
 Write-Host '==================== CONNECTING TO AZURE ===================='
-
 try {
     $context = Get-AzContext
     if (-not $context) {
@@ -291,46 +287,60 @@ try {
     Write-Host "Subcription set to: $($context.Subscription.Id) established"
 }
 catch {
-    Write-Error "Unable to Connect-AzAccount to Subscription ($SubscriptionId) using Managed Identity"
+    Write-Host "Unable to Connect-AzAccount to Subscription ($SubscriptionId) using Managed Identity"
     throw $_
 }
 
-# execute VM query
-try {
-    Write-Host '==================== SELECTING VMs ===================='
 
-    if (-not $includeExpr -or $includeExpr.GetType() -ne [String]) {
-        $includeExpr
-        Write-Error 'Error IncludeExpr should be a string'
-        return
-    }
-    $cmd = "Get-AzVm -Status | Where-Object { ($includeExpr) -and -not ($excludeExpr) }"
 
-    Write-Host 'Selecting Virtual Machines...'
-    Write-Host $cmd
-
-    $vms = Invoke-Expression $cmd
+# if only parameter passed was InculdeVMNames, then just return the VMs
+if (($IncludeResourceGroupNames -and $IncludeResourceGroupNames.count -eq 1) `
+        -and ($IncludeVmNames -and $IncludeVmNames.Count -eq 1) `
+        -and -not $IncludeTags -and -not $IncludeVmState) {
+    Write-Host '==================== GETTING SINGLE VM ===================='
+    $vms = Get-AzVm -Status -ResourceGroupName $IncludeResourceGroupNames[0] -Name $IncludeVmNames[0]
     if (-not $vms) {
         Write-Host 'No VMs found matching the specified criteria.'
         return
     }
-}
-catch {
-    Write-Error "Error selecting VMs - $cmd"
-    throw $_
+
+} else {
+    # execute VM query
+    try {
+        Write-Host '==================== SELECTING VMs ===================='
+
+        if (-not $includeExpr -or $includeExpr.GetType() -ne [String]) {
+            $includeExpr
+            Write-Error 'Error IncludeExpr should be a string'
+            return
+        }
+        $cmd = "Get-AzVm -Status | Select-Object -Property ResourceGroupName, Name, PowerState | Where-Object { ($includeExpr) -and -not ($excludeExpr) }"
+
+        Write-Host 'Selecting Virtual Machines...'
+        Write-Host $cmd
+
+        $vms = Invoke-Expression $cmd
+        if (-not $vms) {
+            Write-Host 'No VMs found matching the specified criteria.'
+            return
+        }
+    }
+    catch {
+        Write-Error "Error selecting VMs - $cmd"
+        throw $_
+    }
+
+    if (-not $vms) {
+        Write-Host 'No VMs selected.'
+        Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
+        return
+    }
 }
 
-if (-not $vms) {
-    Write-Host 'No VMs selected.'
-    Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
-    return
-}
 Write-Host "VMs to $($Action): $($vms.Name -join ', ')"
-
 
 # if not array, only one VM found
 if ($vms -isnot [array]) {
-
     Write-Host "==================== EXECUTING $action ===================="
 
     $vm = $vms | Get-AzVM
@@ -375,6 +385,22 @@ if ($vms -isnot [array]) {
     }
 
     Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
+    return
+}
+
+
+
+# get name of AutomationRunbook
+$rbResourceGroupname = Get-AutomationVariable -Name 'ResourceGroupName' -ErrorAction SilentlyContinue
+if (-not $rbResourceGroupname) {
+    Write-Error 'AutomationRunbook variable "ResourceGroupName" not specified.'
+    return
+}
+
+# get name of AutomationRunbook
+$rbAutomationAccountName = Get-AutomationVariable -Name 'AutomationAccountName' -ErrorAction SilentlyContinue
+if (-not $rbAutomationAccountName) {
+    Write-Error 'AutomationRunbook variable "AutomationAccountName" not specified.'
     return
 }
 
@@ -438,7 +464,7 @@ foreach ($vm in $vms) {
             continue
         }
 
-        $job = Start-AutomationRunbook -Name $automationRunbookName -Parameters $params -ErrorAction Continue
+        $job = Start-AzAutomationRunbook -ResourceGroupName $rbResourceGroupName -AutomationAccountName $rbAutomationAccountName -Name $automationRunbookName -Parameters $params -ErrorAction Continue
         if ($job) {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) $Action job submitted ($job)"
         }
