@@ -440,7 +440,7 @@ else {
             Write-Error 'Error IncludeExpr should be a string'
             return
         }
-        $cmd = "Get-AzVm -Status | Select-Object -Property ResourceGroupName, Name, PowerState | Where-Object { ($includeExpr) -and -not ($excludeExpr) }"
+        $cmd = "Get-AzVm -Status | Select-Object -Property Id, ResourceGroupName, Name, PowerState, Tags, TimeCreated | Where-Object { ($includeExpr) -and -not ($excludeExpr) }"
 
         Write-Host 'Selecting Virtual Machines...'
         Write-Host $cmd
@@ -470,7 +470,7 @@ if ($vms -isnot [array]) {
     Write-Host "==================== EXECUTING $action ===================="
 
     $vm = $vms
-    ExecuteAction -ResourceGroupName $vm.ResourceGroupName -VmName $vm.Name -Action $action
+    ExecuteAction -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name -Action $action
     Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
     return
 }
