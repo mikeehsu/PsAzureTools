@@ -93,6 +93,133 @@ Param (
     [boolean] $Whatif = $false
 )
 
+function InvokeRunCommand {
+
+    # internal function to replace the Invoke-AzVMRunCommand cmdlet. This version does not wait for the completion of the command
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
+        [string] $ResourceGroupName,
+
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
+        [string] $Name,
+
+        [Parameter(Mandatory = $true)]
+        [string] $CommandId,
+
+        [Parameter(Mandatory = $true)]
+        [string] $ScriptString,
+
+        [Parameter()]
+        [boolean] $WhatIf = $false
+    )
+
+    if ($WhatIf) {
+        Write-Host "WhatIf: $($ResourceGroupName)/$($Name) Shutdown would be executed."
+        return $true
+    }
+
+    $command = [PSCustomObject] @{
+        commandId = $CommandId
+        script    = @($ScriptString)
+    }
+    $json = $command | ConvertTo-Json
+
+    $params = @{
+        Method               = 'POST'
+        ResourceGroupName    = $ResourceGroupName
+        ResourceProviderName = 'Microsoft.Compute'
+        ResourceType         = 'virtualMachines'
+        Name                 = "$Name/runCommand"
+        ApiVersion           = '2023-03-01'
+    }
+    $response = Invoke-AzRestMethod @params -Payload $json
+
+    if (-not $response) {
+        Write-Error "$($ResourceGroupName)/$($Name) $Action failed. No response."
+        return $false
+
+    }
+    elseif ($response.StatusCode -ne 202) {
+        Write-Error "$($ResourceGroupName)/$($Name) $Action failed. $($response.StatusCode) $($response.Content)"
+        return $false
+    }
+    return $true
+}
+
+
+function ExecuteAction {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string] $ResourceGroupName,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Action,
+
+        [Parameter()]
+        [boolean] $WhatIf = $false
+    )
+    
+    $vm = Get-AzVM -ResourceGroupName $ResourceGroupName -Name $Name
+    if (-not $vm) {
+        Write-Error "$($vm.ResourceGroupName)/$($vm.Name) VM not found. Unable to $Action."
+        Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
+        return
+    }
+
+    try {
+        if ($Action -eq 'Start') {
+            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) starting..." -NoNewline
+            $result = $vm | Start-AzVM -WhatIf:$WhatIf -NoWait
+
+        }
+        elseif ($Action -eq 'Stop') {
+            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) stopping..." -NoNewline
+            $result = $vm | Stop-AzVM -Force -WhatIf:$WhatIf -NoWait
+        }
+        elseif ($Action -eq 'Shutdown') {
+            if ($vm.StorageProfile.OsDisk.OsType -eq 'Windows') {
+                Write-Host "$($vm.ResourceGroupName)/$($vm.Name) (windows) shutting down ..." -NoNewline
+                $result = $vm | InvokeRunCommand -CommandId RunPowerShellScript -ScriptString 'Stop-Computer -ComputerName localhost -Force' -WhatIf:$WhatIf 
+
+            }
+            elseif ($vm.StorageProfile.OsDisk.OsType -eq 'Linux') {
+                Write-Host "$($vm.ResourceGroupName)/$($vm.Name) (linux) shutting down..." -NoNewline
+                $result = $vm | InvokeRunCommand -CommandId RunShellScript -ScriptString 'shutdown' -WhatIf:$WhatIf
+
+            }
+            else {
+                Write-Error "$ResourceGroupName/$VName unable to $Action."
+                throw "unsupported OsTYpe ($($vm.StorageProfile.OsDisk.OsType))."
+                return
+            }
+        }
+
+        if ($result) {
+            if ($result -is [boolean] -or $result.IsSuccessStatusCode) {
+                Write-Host "Submitted."
+            }
+            else {
+                Write-Host "Failed. $($result.StatusCode - $result.ReasonPhrase)"
+            }
+        }
+        else {
+            if ($WhatIf) {
+                # do nothing
+            }
+            else {
+                Write-Host 'Failed.'
+            }
+        }
+
+    }
+    catch {
+        throw $_
+    }
+
+}
 
 #######################################################################
 ## MAIN
@@ -291,8 +418,6 @@ catch {
     throw $_
 }
 
-
-
 # if only parameter passed was InculdeVMNames, then just return the VMs
 if (($IncludeResourceGroupNames -and $IncludeResourceGroupNames.count -eq 1) `
         -and ($IncludeVmNames -and $IncludeVmNames.Count -eq 1) `
@@ -304,7 +429,8 @@ if (($IncludeResourceGroupNames -and $IncludeResourceGroupNames.count -eq 1) `
         return
     }
 
-} else {
+}
+else {
     # execute VM query
     try {
         Write-Host '==================== SELECTING VMs ===================='
@@ -343,82 +469,18 @@ Write-Host "VMs to $($Action): $($vms.Name -join ', ')"
 if ($vms -isnot [array]) {
     Write-Host "==================== EXECUTING $action ===================="
 
-    $vm = $vms | Get-AzVM
-    if (-not $vm) {
-        Write-Error "$($vm.ResourceGroupName)/$($vm.Name) VM not found. Unable to $Action."
-        Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
-        return
-    }
-
-    try {
-        if ($Action -eq 'Start') {
-            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) starting..."
-            $vm | Start-AzVM -WhatIf:$WhatIf
-
-        }
-        elseif ($Action -eq 'Stop') {
-            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) stopping..."
-            $vm | Stop-AzVM -Force -WhatIf:$WhatIf
-
-        }
-        elseif ($Action -eq 'Shutdown') {
-            if ($vm.StorageProfile.OsDisk.OsType -eq 'Windows') {
-                Write-Host "$($vm.ResourceGroupName)/$($vm.Name) (windows) shutting down ..."
-                $vm | Invoke-AzVMRunCommand -CommandId RunPowerShellScript -ScriptString 'Stop-Computer -ComputerName localhost -Force' -WhatIf:$WhatIf
-
-            }
-            elseif ($vm.StorageProfile.OsDisk.OsType -eq 'Linux') {
-                Write-Host "$($vm.ResourceGroupName)/$($vm.Name) (linux) shutting down..."
-                $vm | Invoke-AzVMRunCommand -CommandId RunShellScript -ScriptString 'shutdown' -WhatIf:$WhatIf
-
-            }
-            else {
-                Write-Error "$ResourceGroupName/$VName unable to $Action."
-                throw "unsupported OsTYpe ($($vm.StorageProfile.OsDisk.OsType))."
-                return
-            }
-        }
-
-    }
-    catch {
-        throw $_
-    }
-
+    $vm = $vms
+    ExecuteAction -ResourceGroupName $vm.ResourceGroupName -VmName $vm.Name -Action $action
     Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
     return
 }
-
-
-
-# get name of AutomationRunbook
-$rbResourceGroupname = Get-AutomationVariable -Name 'ResourceGroupName' -ErrorAction SilentlyContinue
-if (-not $rbResourceGroupname) {
-    Write-Error 'AutomationRunbook variable "ResourceGroupName" not specified.'
-    return
-}
-
-# get name of AutomationRunbook
-$rbAutomationAccountName = Get-AutomationVariable -Name 'AutomationAccountName' -ErrorAction SilentlyContinue
-if (-not $rbAutomationAccountName) {
-    Write-Error 'AutomationRunbook variable "AutomationAccountName" not specified.'
-    return
-}
-
-# get name of AutomationRunbook
-$automationRunbookName = Get-AutomationVariable -Name 'AutomationRunbookName' -ErrorAction SilentlyContinue
-if (-not $automationRunbookName) {
-    $automationRunbookName = 'Execute-VmActionRunbook'
-}
-
-Write-Host "==================== SUBMITTING JOBS for $Action ===================="
-Write-Host "Automation RunbookName: $($automationRunbookName)"
 
 # submit job to perform action
 foreach ($vm in $vms) {
 
     # exclude if VM has recent stop activity
     if ($ExcludeStoppedAfter) {
-        $stopActivities = Get-AzActivityLog -ResourceId $vm.Id -StartTime $ExcludeStoppedAfter | Where-Object {$_.OperationName -eq 'Microsoft.Compute/virtualMachines/deallocate/action' -and $_.Status -eq 'Succeeded' }
+        $stopActivities = Get-AzActivityLog -ResourceId $vm.Id -StartTime $ExcludeStoppedAfter | Where-Object { $_.OperationName -eq 'Microsoft.Compute/virtualMachines/deallocate/action' -and $_.Status -eq 'Succeeded' }
         if ($stopActivities) {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) no action required, stopped on $($stopActivities[0].EventTimestamp)."
             continue
@@ -450,32 +512,7 @@ foreach ($vm in $vms) {
         throw "Invalid action ($Action)"
     }
 
-    try {
-        $params = @{
-            'Action'                    = $Action;
-            'SubscriptionId'            = $context.Subscription.Id;
-            'IncludeResourceGroupNames' = $vm.ResourceGroupName;
-            'IncludeVmNames'            = $vm.Name
-        }
-
-        # submit a job to perform the action
-        if ($WhatIf) {
-            Write-Host "What If: submitting job to $Action VM $($vm.ResourceGroupName)/$($vm.Name)"
-            continue
-        }
-
-        $job = Start-AzAutomationRunbook -ResourceGroupName $rbResourceGroupName -AutomationAccountName $rbAutomationAccountName -Name $automationRunbookName -Parameters $params -ErrorAction Continue
-        if ($job) {
-            Write-Host "$($vm.ResourceGroupName)/$($vm.Name) $Action job submitted ($job)"
-        }
-        else {
-            Write-Error "$($vm.ResourceGroupName)/$($vm.Name) $Action job submission failed."
-        }
-    }
-    catch {
-        Write-Error "$($vm.Name) unable to submit $Action job for $automationRunbookName"
-        throw $_
-    }
+    ExecuteAction -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name -Action $action -WhatIf:$WhatIf
 }
 
 Write-Host "Script complete. ($(New-TimeSpan $StartTime (Get-Date).ToString()) elapsed)"
