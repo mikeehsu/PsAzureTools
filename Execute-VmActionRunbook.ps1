@@ -52,7 +52,7 @@ Exclude virtual machines that were stopped after a specified prior timespan (e.g
 
 Param (
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Start', 'Stop', 'Shutdown')]
+    [ValidateSet('Start', 'Stop', 'Shutdown', 'Deallocate')]
     [string] $Action,
 
     [Parameter()]
@@ -175,7 +175,7 @@ function ExecuteAction {
             $result = $vm | Start-AzVM -WhatIf:$WhatIf -NoWait
 
         }
-        elseif ($Action -eq 'Stop') {
+        elseif ($Action -eq 'Stop' -or $Action -eq 'Deallocate') {
             Write-Host "$($vm.ResourceGroupName)/$($vm.Name) stopping..." -NoNewline
             $result = $vm | Stop-AzVM -Force -WhatIf:$WhatIf -NoWait
         }
