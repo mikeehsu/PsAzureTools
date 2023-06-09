@@ -400,7 +400,7 @@ try {
     $context = Get-AzContext
     if (-not $context) {
         # Ensures you do not inherit an AzContext in your runbook
-        $results = Disable-AzContextAutosave -Scope Process
+        $null = Disable-AzContextAutosave -Scope Process
 
         # Connect to Azure with system-assigned managed identity
         $connection = Connect-AzAccount -Environment AzureUSGovernment -Identity -ErrorAction Stop

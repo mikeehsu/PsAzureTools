@@ -26,7 +26,7 @@ State of VM to include in the action. Only one state can be specified.
 List of resource group names to exclude in the action
 
 .PARAMETER ExcludeVmNames
-List of Virtual Machine Names to exclude
+List of Virtual Machine Names to excludehttps://github.com/microsoft/Federal-Business-Applications/blob/main/whitepapers/power-platform-azure-synapse/README.md#setup-notes-for-azure-for-government
 
 .PARAMETER ExcludeTags
 List of tags and tag values to exclude in the action
