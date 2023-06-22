@@ -1,4 +1,4 @@
-
+#Requires -Modules Az.Accounts, Az.Synapse
 function ExecuteWorkspacePoolAction {
     [CmdletBinding()]
     param (
@@ -12,7 +12,7 @@ function ExecuteWorkspacePoolAction {
         [string[]] $SqlPoolName,
 
 
-        [ValidateSet(“Stop”,"Start")]
+        [ValidateSet("Stop","Start")]
         [Parameter(Mandatory)]
         [string] $Action
     )
@@ -62,5 +62,5 @@ function ExecuteWorkspacePoolAction {
 
 }
 
-# ExecuteWorkspacePoolAction -ResourceGroupName "hokiesynapsedemo" -WorkspaceName "hokiesynapsews" -Action Stop
-# ExecuteWorkspacePoolAction -ResourceGroupName "hokiesynapsedemo" -WorkspaceName "hokiesynapsews" -Action Start -SqlPoolName 'hokiesqlpool01'
+# ExecuteWorkspacePoolAction -ResourceGroupName "my-rg" -WorkspaceName "my-workspace" -Action Stop
+# ExecuteWorkspacePoolAction -ResourceGroupName "my-rg" -WorkspaceName "my-workspace" -Action Start -SqlPoolName 'mypool01'
