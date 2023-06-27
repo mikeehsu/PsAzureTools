@@ -5,7 +5,9 @@ Test network connectivity between a source IP address and one or more destinatio
 .DESCRIPTION
 Tests network connectivity between a source IP address and one or more destination IP addresses and ports using Azure Network Watcher. The script can be used to diagnose network connectivity issues and verify that traffic is allowed between the source and destination IP addresses and ports.
 
-The script requires the Azure Network Watcher service to be enabled in the Azure subscription and a Network Watcher resource to be created in the same region as the source and destination IP addresses.
+The script requires the Azure Network Watcher service to be enabled in the Azure subscription and a Network Watcher resource to be created in the same region as the source and destination IP addresses. Additionally, the Network Watcher extension must be installed on all VMs that are used as source IP addresses.
+
+The script supports two modes of operation: IP address mode and file mode. In IP address mode, the script tests connectivity between a single source IP address and one or more destination IP addresses and ports. In file mode, the script reads a list of source and destination IP addresses and ports from a file and tests connectivity between each source and destination pair.
 
 .PARAMETER ResourceGroupName
 Specifies the name of the resource group that contains the Network Watcher resource
@@ -25,6 +27,8 @@ Specifies the destination IP addresses to test connectivity to
 .PARAMETER DestinationPorts
 Specifies the destination ports to test connectivity to
 
+.PARAMETER FilePath
+Specifies the path to a CSV file containing the source and destination IP addresses and ports to test connectivity between. The file must contain a header row with the following column names: SourceAddress, SourcePort, DestinationAddress, DestinationPort. The script will ignore any other columns in the file.
 
 .EXAMPLE
 Test-NetworkWatcher.ps1 -ResourceGroupName "MyResourceGroup" -NetworkWatcherName "MyNetworkWatcher" -SourceAddress "10.0.0.4" -SourcePort "3389" -DestinationAddresses "10.0.0.5" -DestinationPorts 3389
@@ -51,7 +55,11 @@ Param(
 
     [Parameter()]
     [Alias("Port", "DestinationPort")]
-    [int[]] $DestinationPorts = @(80, 443)
+    [int[]] $DestinationPorts = @(80, 443),
+
+    [Parameter(ParameterSetName='FilePath')]
+    [string] $FilePath
+
 )
 
 Set-StrictMode -Version Latest
@@ -360,32 +368,33 @@ Function ParseIpAddressRange {
         [string] $IpAddressRange
     )
 
-    if ($IpAddressRange -like '*-*') {
-        $ipRange = $IpAddressRange.Split('-')
+    if ($ipAddressRange -match '\b(?:\d{1,3}\.){3}\d{1,3}\b') {
+        if ($IpAddressRange -like '*-*') {
+            $ipRange = $IpAddressRange.Split('-')
 
-        $startIp = $ipRange[0]
-        if ($ipRange.Length -eq 1) {
-            $endIp = $startIp
+            $startIp = $ipRange[0]
+            if ($ipRange.Length -eq 1) {
+                $endIp = $startIp
+            }
+            else {
+                $endIp = $ipRange[1]
+            }
+            $ipSet = GetIpInRange -StartIpAddress $startIp -EndIpAddress $endIp
         }
-        else {
-            $endIp = $ipRange[1]
-        }
-        $ipSet = GetIpInRange -StartIpAddress $startIp -EndIpAddress $endIp
-    }
-    elseif ($IpAddressRange -like '*/*') {
-        $ipSet = (Get-IPv4NetworkInfo -CIDRAddress $IpAddressRange -IncludeIPRange).IPRange
+        elseif ($IpAddressRange -like '*/*') {
+            $ipSet = (Get-IPv4NetworkInfo -CIDRAddress $IpAddressRange -IncludeIPRange).IPRange
 
+        } else {
+            $ipSet = $IpAddressRange.Split(';')
+        }
     }
     else {
-        $ipSet = $IpAddress.Split(';')
+        $ipSet = $IpAddressRange.Split(';')
     }
 
     return $ipSet
 
 }
-
-
-
 
 ############################################################################
 
@@ -419,6 +428,50 @@ if ($DestinationAddresses) {
                 $testCase.DestinationAddress = $ip
                 $testCase.DestinationPort = $port
                 $testCase.SourceId = $vmMap.FindVM($SourceAddress)
+
+                $testCases += $testCase
+            }
+        }
+    }
+}
+
+
+if ($FilePath) {
+     $testFile = Import-Csv -Path $FilePath -Delimiter ','
+
+    $portsIncluded = $false
+    if ($testFile | Get-member -MemberType 'NoteProperty' | Where-Object { $_.Name -eq 'DestinationPort' }) {
+        $portsIncluded = $true
+    }
+
+    # buuld test cases
+    foreach ($row in $testFile) {
+        $SourceId = $vmMap.FindVM($row.SourceAddress)
+        if (-not $SourceId) {
+            Write-Host "SourceAddress:$($row.SourceAddress) - No VM found with this IP address."
+            continue
+        }
+
+        # port settings
+        $ports = @()
+        if ($portsIncluded -and ($row.DestinationPort.Trim().Length -gt 0)) {
+            $ports = $row.DestinationPort.Split(';')
+        }
+        else {
+            $ports = $DestinationPorts
+        }
+
+        # ipAddresses
+        $ipSet = ParseIpAddressRange -IpAddressRange $row.DestinationAddress
+
+        foreach ($ip in $ipSet) {
+            foreach ($port in $ports) {
+                $testCase = [TestCase]::New()
+                $testCase.SourceAddress = $row.SourceAddress
+                $testCase.SourcePort = $row.SourcePort
+                $testCase.DestinationAddress = $ip
+                $testCase.DestinationPort = $port
+                $testCase.SourceId = $SourceId
 
                 $testCases += $testCase
             }
@@ -463,5 +516,4 @@ do {
         $jobIds.Remove($job.Id)
     }
 } until (-not $jobIds)
-
 
