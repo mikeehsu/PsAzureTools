@@ -110,6 +110,21 @@ Resources
     }
 }
 
+class TestResult {
+    [string] $SourceAddress
+    [int] $SourcePort
+    [string] $DestinationAddress
+    [int] $DestinationPort
+    [string] $ConnectionStatus
+    [int] $AvgLatencyInMs
+    [int] $MinLatencyInMs
+    [int] $MaxLatencyInMs
+    [int] $ProbesSent
+    [int] $ProbesFailed
+    [array] $Hops
+}
+
+
 #####################################################################
 Function Get-IPv4NetworkInfo {
     <#
@@ -401,8 +416,8 @@ Function ParseIpAddressRange {
 Set-StrictMode -Version 3
 
 $vmMap = [VmIpMap]::New()
-$report = @()
 $testCases = @()
+$testResults = @()
 
 # validate parameters
 if (-not ($FilePath -or $DestinationAddresses)) {
@@ -415,7 +430,7 @@ if ($OnlyShowPassed -and $OnlyShowFailed) {
     return
 }
 
-# setup test cases
+# build test cases from command line
 if ($DestinationAddresses) {
     foreach ($IpAddress in $DestinationAddresses) {
         $ipSet = ParseIpAddressRange -IpAddressRange $IpAddress
@@ -435,7 +450,7 @@ if ($DestinationAddresses) {
     }
 }
 
-
+# build test cases from file
 if ($FilePath) {
      $testFile = Import-Csv -Path $FilePath -Delimiter ','
 
@@ -448,7 +463,15 @@ if ($FilePath) {
     foreach ($row in $testFile) {
         $SourceId = $vmMap.FindVM($row.SourceAddress)
         if (-not $SourceId) {
-            Write-Host "SourceAddress:$($row.SourceAddress) - No VM found with this IP address."
+            Write-Host "SourceAddress:$($row.SourceAddress) - No VM found with this IP address." -ForegroundColor Yellow
+            $testResult = [TestResult]::New()
+            $testResult.SourceAddress = $row.SourceAddress
+            $testResult.SourcePort = $row.SourcePort
+            $testResult.DestinationAddress = $row.DestinationAddress
+            $testResult.DestinationPort = $row.DestinationPort
+            $testResult.ConnectionStatus = "No VM found with IP Address"
+
+            $testResults += $testResult
             continue
         }
 
@@ -481,14 +504,17 @@ if ($FilePath) {
 
 $jobs = @()
 foreach ($testCase in $testCases) {
+    # correct for a bug in Test-AzNetworkWatcherConnectivity when testing against a VirtualMachine that is stopped
+    $testCase.SourceId = $testCase.SourceId.Replace('/virtualmachines/', '/virtualMachines/')
+
     $job = Test-AzNetworkWatcherConnectivity -ResourceGroupName $ResourceGroupName -NetworkWatcherName $NetworkWatcherName `
         -SourceId $testCase.SourceId -SourcePort $testCase.SourcePort `
         -DestinationAddress $testCase.DestinationAddress -DestinationPort $testCase.DestinationPort `
         -AsJob
     $testCase.JobId = $job.Id
-
-    Write-Verbose "Test case submitted... Source:$($testCase.SourceAddress):$($testCase.SourcePort) Destination:$($testCase.DestinationAddress):$($testCase.DestinationPort) JobId:$($testCase.JobId)"
     $jobs += $job
+
+    Write-Verbose "Test submitted... Source:$($testCase.SourceAddress):$($testCase.SourcePort) Destination:$($testCase.DestinationAddress):$($testCase.DestinationPort) JobId:$($testCase.JobId)"
 }
 
 $jobIds =  [System.Collections.ArrayList] @($jobs.Id)
@@ -496,24 +522,37 @@ do {
     $jobs = Wait-Job -Id $jobIds -Any
 
     foreach ($job in $jobs) {
+        # find original test case
         $testCase = $testCases | Where-Object {$_.JobId -eq $job.Id}
-        $result = Receive-Job -Job $job
-    
-        [PSCustomObject]@{
-            SourceAddress = $testCase.SourceAddress
-            SourcePort = $testCase.SourcePort
-            DestinationAddress = $testCase.DestinationAddress
-            DestinationPort = $testCase.DestinationPort
-            ConnectionStatus = $result.ConnectionStatus
-            AvgLatencyInMs = $result.AvgLatencyInMs
-            MinLatencyInMs = $result.MinLatencyInMs
-            MaxLatencyInMs = $result.MaxLatencyInMs
-            ProbesSent = $result.ProbesSent
-            ProbesFailed = $result.ProbesFailed   
-        }
 
-        $job | Remove-Job
+        $testResult = [TestResult]::New()
+        $testResult.SourceAddress = $testCase.SourceAddress
+        $testResult.SourcePort = $testCase.SourcePort
+        $testResult.DestinationAddress = $testCase.DestinationAddress
+        $testResult.DestinationPort = $testCase.DestinationPort
+
+
+        if ($job.State -eq 'Completed') {
+            Write-Verbose "Test case completed... Source:$($testResult.SourceAddress):$($testResult.SourcePort) Destination:$($testResult.DestinationAddress):$($testResult.DestinationPort) JobId:$($job.Id)"
+            $result = $job | Receive-Job
+
+            $testResult.ConnectionStatus = $result.ConnectionStatus
+            $testResult.AvgLatencyInMs = $result.AvgLatencyInMs
+            $testResult.MinLatencyInMs = $result.MinLatencyInMs
+            $testResult.MaxLatencyInMs = $result.MaxLatencyInMs
+            $testResult.ProbesSent = $result.ProbesSent
+            $testResult.ProbesFailed = $result.ProbesFailed   
+            $testResult.Hops = $result.Hops | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+            $job | Remove-Job
+        } else {
+            $testResult.ConnectionStatus = "Job $($job.State)"
+            Write-Host "Job $($job.Id) state $($job.State). Job left in queue for troubleshooting." -ForegroundColor Red
+        }
+       
+        $testResults += $testResult
         $jobIds.Remove($job.Id)
     }
+
 } until (-not $jobIds)
 
+$testResults
