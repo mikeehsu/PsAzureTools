@@ -95,7 +95,6 @@ Resources
     ) on vmId
     | project-away vmId1
     | sort by vmName asc
-| where array_length(publicIps)>0
 "@
         [VmIpMap]::vms = Search-AzGraph -Query $query
     }
