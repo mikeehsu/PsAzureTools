@@ -474,7 +474,6 @@ if ($FilePath) {
         foreach ($ip in $ipSet) {
             foreach ($port in $ports) {
                 if (-not $vm) {
-                    Write-Host "SourceAddress:$($row.SourceAddress) - IP address not found" -ForegroundColor Yellow
                     $testResult = [TestResult]::New()
                     $testResult.SourceAddress = $row.SourceAddress
                     $testResult.SourcePort = $row.SourcePort
@@ -483,6 +482,7 @@ if ($FilePath) {
                     $testResult.ConnectionStatus = "IP Address not found"
         
                     $testResults += $testResult
+                    Write-Host "IP address not found - SourceAddress:$($row.SourceAddress)" -ForegroundColor Yellow
                     continue
                 }
         
@@ -495,6 +495,7 @@ if ($FilePath) {
                     $testResult.ConnectionStatus = $vm.powerState
         
                     $testResults += $testResult
+                    Write-Host "VM not running - SourceAddress:$($row.SourceAddress)" -ForegroundColor Yellow
                     continue
                 }
         
@@ -511,7 +512,8 @@ if ($FilePath) {
     }
 }
 
-$jobs = @()
+# submit jobs 
+$jobIds =  [System.Collections.ArrayList] @()
 foreach ($testCase in $testCases) {
     # correct for a bug in Test-AzNetworkWatcherConnectivity when testing against a VirtualMachine that is stopped
     $testCase.SourceId = $testCase.SourceId.Replace('/virtualmachines/', '/virtualMachines/')
@@ -521,17 +523,22 @@ foreach ($testCase in $testCases) {
         -DestinationAddress $testCase.DestinationAddress -DestinationPort $testCase.DestinationPort `
         -AsJob
     $testCase.JobId = $job.Id
-    $jobs += $job
 
+    $null = $jobIds.Add($job.Id)
     Write-Verbose "Submitted - Source:$($testCase.SourceAddress):$($testCase.SourcePort) Destination:$($testCase.DestinationAddress):$($testCase.DestinationPort) JobId:$($testCase.JobId)"
 }
 
-$jobIds =  [System.Collections.ArrayList] @($jobs.Id)
+# get job results
 do {
-    $jobs = Wait-Job -Id $jobIds -Any -Timeout 15
-    if (-not $jobs) {
-        Write-Verbose "Waiting on $($jobIds.Count) job(s) to complete..."
-        continue
+    try {
+        $jobs = Wait-Job -Id $jobIds -Any -Timeout 15 
+        if (-not $jobs) {
+            Write-Verbose "Waiting on $($jobIds.Count) job(s) to complete..."
+            continue
+        }    
+    } catch {
+        throw $_
+        break
     }
 
     foreach ($job in $jobs) {
