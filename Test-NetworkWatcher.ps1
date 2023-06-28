@@ -81,7 +81,7 @@ class VmIpMap {
         $query = @"
 Resources
     | where type =~ 'microsoft.compute/virtualmachines'
-    | project vmId = tolower(tostring(id)), vmName = name
+    | project vmId = tolower(tostring(id)), vmName = name, powerState = tostring(properties.extended.instanceView.powerState.displayStatus)
     | join (Resources
         | where type =~ 'microsoft.network/networkinterfaces'
         | mv-expand ipconfig=properties.ipConfigurations
@@ -100,10 +100,10 @@ Resources
         [VmIpMap]::vms = Search-AzGraph -Query $query
     }
 
-    [string] FindVM($ipAddress) {
+    [PSCustomObject] GetVmByIpAddress($ipAddress) {
         foreach ($vm in [VmIpMap]::vms) {
             if ($vm.privateIps -contains $ipAddress) {
-                return $vm.VmId
+                return $vm
             }
         }
         return $null
@@ -413,7 +413,7 @@ Function ParseIpAddressRange {
 
 ############################################################################
 
-Set-StrictMode -Version 3
+Set-StrictMode -Version Latest
 
 $vmMap = [VmIpMap]::New()
 $testCases = @()
@@ -422,11 +422,6 @@ $testResults = @()
 # validate parameters
 if (-not ($FilePath -or $DestinationAddresses)) {
     Write-Error 'Either -FilePath ore -ToIpAddresses must be supplied.'
-    return
-}
-
-if ($OnlyShowPassed -and $OnlyShowFailed) {
-    Write-Error '-OnlyShowPassed and -OnlyShowFailed cannot be used togetehr. Please remove one and try again.'
     return
 }
 
@@ -461,20 +456,6 @@ if ($FilePath) {
 
     # buuld test cases
     foreach ($row in $testFile) {
-        $SourceId = $vmMap.FindVM($row.SourceAddress)
-        if (-not $SourceId) {
-            Write-Host "SourceAddress:$($row.SourceAddress) - No VM found with this IP address." -ForegroundColor Yellow
-            $testResult = [TestResult]::New()
-            $testResult.SourceAddress = $row.SourceAddress
-            $testResult.SourcePort = $row.SourcePort
-            $testResult.DestinationAddress = $row.DestinationAddress
-            $testResult.DestinationPort = $row.DestinationPort
-            $testResult.ConnectionStatus = "No VM found with IP Address"
-
-            $testResults += $testResult
-            continue
-        }
-
         # port settings
         $ports = @()
         if ($portsIncluded -and ($row.DestinationPort.Trim().Length -gt 0)) {
@@ -487,14 +468,42 @@ if ($FilePath) {
         # ipAddresses
         $ipSet = ParseIpAddressRange -IpAddressRange $row.DestinationAddress
 
+        # get VM
+        $vm = $vmMap.GetVmByIpAddress($row.SourceAddress)
+
         foreach ($ip in $ipSet) {
             foreach ($port in $ports) {
+                if (-not $vm) {
+                    Write-Host "SourceAddress:$($row.SourceAddress) - IP address not found" -ForegroundColor Yellow
+                    $testResult = [TestResult]::New()
+                    $testResult.SourceAddress = $row.SourceAddress
+                    $testResult.SourcePort = $row.SourcePort
+                    $testResult.DestinationAddress = $ip
+                    $testResult.DestinationPort = $port
+                    $testResult.ConnectionStatus = "IP Address not found"
+        
+                    $testResults += $testResult
+                    continue
+                }
+        
+                if ($vm.powerState -ne 'VM running') {
+                    $testResult = [TestResult]::New()
+                    $testResult.SourceAddress = $row.SourceAddress
+                    $testResult.SourcePort = $row.SourcePort
+                    $testResult.DestinationAddress = $ip
+                    $testResult.DestinationPort = $port
+                    $testResult.ConnectionStatus = $vm.powerState
+        
+                    $testResults += $testResult
+                    continue
+                }
+        
                 $testCase = [TestCase]::New()
                 $testCase.SourceAddress = $row.SourceAddress
                 $testCase.SourcePort = $row.SourcePort
                 $testCase.DestinationAddress = $ip
                 $testCase.DestinationPort = $port
-                $testCase.SourceId = $SourceId
+                $testCase.SourceId = $vm.vmId
 
                 $testCases += $testCase
             }
@@ -514,12 +523,16 @@ foreach ($testCase in $testCases) {
     $testCase.JobId = $job.Id
     $jobs += $job
 
-    Write-Verbose "Test submitted... Source:$($testCase.SourceAddress):$($testCase.SourcePort) Destination:$($testCase.DestinationAddress):$($testCase.DestinationPort) JobId:$($testCase.JobId)"
+    Write-Verbose "Submitted - Source:$($testCase.SourceAddress):$($testCase.SourcePort) Destination:$($testCase.DestinationAddress):$($testCase.DestinationPort) JobId:$($testCase.JobId)"
 }
 
 $jobIds =  [System.Collections.ArrayList] @($jobs.Id)
 do {
-    $jobs = Wait-Job -Id $jobIds -Any
+    $jobs = Wait-Job -Id $jobIds -Any -Timeout 15
+    if (-not $jobs) {
+        Write-Verbose "Waiting on $($jobIds.Count) job(s) to complete..."
+        continue
+    }
 
     foreach ($job in $jobs) {
         # find original test case
@@ -531,9 +544,8 @@ do {
         $testResult.DestinationAddress = $testCase.DestinationAddress
         $testResult.DestinationPort = $testCase.DestinationPort
 
-
         if ($job.State -eq 'Completed') {
-            Write-Verbose "Test case completed... Source:$($testResult.SourceAddress):$($testResult.SourcePort) Destination:$($testResult.DestinationAddress):$($testResult.DestinationPort) JobId:$($job.Id)"
+            Write-Verbose "Completed - JobId:$($job.Id) Source:$($testResult.SourceAddress):$($testResult.SourcePort) Destination:$($testResult.DestinationAddress):$($testResult.DestinationPort)"
             $result = $job | Receive-Job
 
             $testResult.ConnectionStatus = $result.ConnectionStatus
@@ -546,13 +558,13 @@ do {
             $job | Remove-Job
         } else {
             $testResult.ConnectionStatus = "Job $($job.State)"
-            Write-Host "Job $($job.Id) state $($job.State). Job left in queue for troubleshooting." -ForegroundColor Red
+            Write-Host "Failed - Job $($job.Id) state $($job.State). Source:$($testResult.SourceAddress):$($testResult.SourcePort) Destination:$($testResult.DestinationAddress):$($testResult.DestinationPort). Job left in queue." -ForegroundColor Red
         }
        
         $testResults += $testResult
         $jobIds.Remove($job.Id)
     }
 
-} until (-not $jobIds)
+} until ($jobIds.Count -eq 0)
 
 $testResults
