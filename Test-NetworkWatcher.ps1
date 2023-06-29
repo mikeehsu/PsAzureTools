@@ -27,6 +27,12 @@ Specifies the destination IP addresses to test connectivity to
 .PARAMETER DestinationPorts
 Specifies the destination ports to test connectivity to
 
+.PARAMETER Protocol
+Specifies the protocol to use for the test. Valid values are TCP and ICMP. The default value is TCP.
+
+.PARAMETER ExpectedResult
+Specifies the expected result of the test. Valid values are Reachable and Unreachable. The default value is Reachable.
+
 .PARAMETER FilePath
 Specifies the path to a CSV file containing the source and destination IP addresses and ports to test connectivity between. The file must contain a header row with the following column names: SourceAddress, SourcePort, DestinationAddress, DestinationPort. The script will ignore any other columns in the file.
 
@@ -50,78 +56,25 @@ Param(
     [string] $SourcePort,
 
     [Parameter(ParameterSetName='IpAddress')]
-    [Alias("IpAddress", "DestinationAddress")]
+    [Alias('IpAddress', 'DestinationAddress')]
     [string[]] $DestinationAddresses,
 
     [Parameter()]
-    [Alias("Port", "DestinationPort")]
-    [int[]] $DestinationPorts = @(80, 443),
+    [Alias('Port', 'DestinationPort')]
+    [int[]] $DestinationPorts = @(80,443),
+
+    [Parameter()]
+    [ValidateSet('TCP', 'ICMP')]
+    [string] $Protocol = 'TCP',
+
+    [Parameter()]
+    [ValidateSet('Reachable', 'Unreachable')]
+    [string] $ExpectedResult = 'Reachable',
 
     [Parameter(ParameterSetName='FilePath')]
     [string] $FilePath
 
 )
-
-Set-StrictMode -Version Latest
-
-Class TestCase {
-    [string] $SourceAddress
-    [int] $SourcePort
-    [string] $DestinationAddress
-    [int] $DestinationPort
-    [string] $SourceId
-    [int] $JobId
-}
-
-class VmIpMap {
-    [array] static $vms
-
-    VmIpMap() {
-        # load IP address of all VMs in the subscription
-        $query = @"
-Resources
-    | where type =~ 'microsoft.compute/virtualmachines'
-    | project vmId = tolower(tostring(id)), vmName = name, powerState = tostring(properties.extended.instanceView.powerState.displayStatus)
-    | join (Resources
-        | where type =~ 'microsoft.network/networkinterfaces'
-        | mv-expand ipconfig=properties.ipConfigurations
-        | project vmId = tolower(tostring(properties.virtualMachine.id)), privateIp = ipconfig.properties.privateIPAddress, publicIpId = tostring(ipconfig.properties.publicIPAddress.id)
-        | join kind=leftouter (Resources
-            | where type =~ 'microsoft.network/publicipaddresses'
-            | project publicIpId = id, publicIp = properties.ipAddress
-        ) on publicIpId
-        | project-away publicIpId, publicIpId1
-        | summarize privateIps = make_list(privateIp), publicIps = make_list(publicIp) by vmId
-    ) on vmId
-    | project-away vmId1
-    | sort by vmName asc
-"@
-        [VmIpMap]::vms = Search-AzGraph -Query $query
-    }
-
-    [PSCustomObject] GetVmByIpAddress($ipAddress) {
-        foreach ($vm in [VmIpMap]::vms) {
-            if ($vm.privateIps -contains $ipAddress) {
-                return $vm
-            }
-        }
-        return $null
-    }
-}
-
-class TestResult {
-    [string] $SourceAddress
-    [int] $SourcePort
-    [string] $DestinationAddress
-    [int] $DestinationPort
-    [string] $ConnectionStatus
-    [int] $AvgLatencyInMs
-    [int] $MinLatencyInMs
-    [int] $MaxLatencyInMs
-    [int] $ProbesSent
-    [int] $ProbesFailed
-    [array] $Hops
-}
 
 
 #####################################################################
@@ -414,9 +367,79 @@ Function ParseIpAddressRange {
 
 Set-StrictMode -Version Latest
 
-$vmMap = [VmIpMap]::New()
+Class TestCase {
+    [string] $SourceAddress
+    [int] $SourcePort
+    [string] $DestinationAddress
+    [int] $DestinationPort
+    [string] $SourceId
+    [string] $Protocol
+    [string] $ExpectedResult
+    [int] $JobId
+}
+
+class VmIpMap {
+    [array] static $vms
+
+    VmIpMap() {
+        # load IP address of all VMs in the subscription
+        $query = @"
+Resources
+    | where type =~ 'microsoft.compute/virtualmachines'
+    | project vmId = tolower(tostring(id)), vmName = name, powerState = tostring(properties.extended.instanceView.powerState.displayStatus)
+    | join (Resources
+        | where type =~ 'microsoft.network/networkinterfaces'
+        | mv-expand ipconfig=properties.ipConfigurations
+        | project vmId = tolower(tostring(properties.virtualMachine.id)), privateIp = ipconfig.properties.privateIPAddress, publicIpId = tostring(ipconfig.properties.publicIPAddress.id)
+        | join kind=leftouter (Resources
+            | where type =~ 'microsoft.network/publicipaddresses'
+            | project publicIpId = id, publicIp = properties.ipAddress
+        ) on publicIpId
+        | project-away publicIpId, publicIpId1
+        | summarize privateIps = make_list(privateIp), publicIps = make_list(publicIp) by vmId
+    ) on vmId
+    | project-away vmId1
+    | sort by vmName asc
+"@
+        [VmIpMap]::vms = Search-AzGraph -Query $query
+    }
+
+    [PSCustomObject] GetVmByIpAddress($ipAddress) {
+        foreach ($vm in [VmIpMap]::vms) {
+            if ($vm.privateIps -contains $ipAddress) {
+                return $vm
+            }
+        }
+        return $null
+    }
+}
+
+class TestResult {
+    [string] $SourceAddress
+    [int] $SourcePort
+    [string] $DestinationAddress
+    [int] $DestinationPort
+    [string] $Protocol
+    [string] $ExpectedResult
+    [string] $ConnectionStatus
+    [int] $AvgLatencyInMs
+    [int] $MinLatencyInMs
+    [int] $MaxLatencyInMs
+    [int] $ProbesSent
+    [int] $ProbesFailed
+    [array] $Hops
+    [string] $Result
+}
+
+
+# initialize variables
 $testCases = @()
 $testResults = @()
+
+# load VM map for source IP
+$vmMap = [VmIpMap]::New()
+
+# create protocol configuration
 
 # validate parameters
 if (-not ($FilePath -or $DestinationAddresses)) {
@@ -437,6 +460,8 @@ if ($DestinationAddresses) {
                 $testCase.DestinationAddress = $ip
                 $testCase.DestinationPort = $port
                 $testCase.SourceId = $vmMap.FindVM($SourceAddress)
+                $testCase.Protocol = $Protocol
+                $testCase.ExpectedResult = $ExpectedResult
 
                 $testCases += $testCase
             }
@@ -448,10 +473,9 @@ if ($DestinationAddresses) {
 if ($FilePath) {
      $testFile = Import-Csv -Path $FilePath -Delimiter ','
 
-    $portsIncluded = $false
-    if ($testFile | Get-member -MemberType 'NoteProperty' | Where-Object { $_.Name -eq 'DestinationPort' }) {
-        $portsIncluded = $true
-    }
+    $portsIncluded = ($null -ne ($testFile | Get-member -MemberType 'NoteProperty' | Where-Object { $_.Name -eq 'DestinationPort' }))
+    $protocolIncluded = ($null -ne ($testFile | Get-member -MemberType 'NoteProperty' | Where-Object { $_.Name -eq 'Protocol' }))
+    $expectedResultIncluded = ($null -ne ($testFile | Get-member -MemberType 'NoteProperty' | Where-Object { $_.Name -eq 'ExpectedResult' }))
 
     # buuld test cases
     foreach ($row in $testFile) {
@@ -464,6 +488,21 @@ if ($FilePath) {
             $ports = $DestinationPorts
         }
 
+        if ($protocolIncluded -and ($row.Protocol.Trim().Length -gt 0)) {
+            $testProtocol = $row.Protocol
+        }
+        else {
+            $testProtocol = $Protocol
+        }
+
+        if ($ExpectedResultIncluded -and ($row.ExpectedResult.Trim().Length -gt 0)) {
+            $testExpectedResult = $row.ExpectedResult
+        }
+        else {
+            $testExpectedResult = $ExpectedResult
+        }
+
+
         # ipAddresses
         $ipSet = ParseIpAddressRange -IpAddressRange $row.DestinationAddress
 
@@ -471,6 +510,11 @@ if ($FilePath) {
         $vm = $vmMap.GetVmByIpAddress($row.SourceAddress)
 
         foreach ($ip in $ipSet) {
+
+            if ($testProtocol -eq 'ICMP') {
+                $ports = @($null)
+            }
+
             foreach ($port in $ports) {
                 if (-not $vm) {
                     $testResult = [TestResult]::New()
@@ -478,10 +522,13 @@ if ($FilePath) {
                     $testResult.SourcePort = $row.SourcePort
                     $testResult.DestinationAddress = $ip
                     $testResult.DestinationPort = $port
-                    $testResult.ConnectionStatus = "IP Address not found"
+                    $testResult.Protocol = $testProtocol
+                    $testResult.ExpectedResult = $testExpectedResult
+                    $testResult.Result = 'TestNotRun'
+                    $testResult.ConnectionStatus = 'IP Address not found'
         
                     $testResults += $testResult
-                    Write-Host "IP address not found - SourceAddress:$($row.SourceAddress)" -ForegroundColor Yellow
+                    Write-Host "IP address not found - $($row.SourceAddress)" -ForegroundColor Yellow
                     continue
                 }
         
@@ -491,10 +538,13 @@ if ($FilePath) {
                     $testResult.SourcePort = $row.SourcePort
                     $testResult.DestinationAddress = $ip
                     $testResult.DestinationPort = $port
+                    $testResult.Protocol = $testProtocol
+                    $testResult.ExpectedResult = $testExpectedResult
                     $testResult.ConnectionStatus = $vm.powerState
+                    $testResult.Result = 'TestNotRun'
         
                     $testResults += $testResult
-                    Write-Host "VM not running - SourceAddress:$($row.SourceAddress)" -ForegroundColor Yellow
+                    Write-Host "VM not running - $($row.SourceAddress)" -ForegroundColor Yellow
                     continue
                 }
         
@@ -504,6 +554,8 @@ if ($FilePath) {
                 $testCase.DestinationAddress = $ip
                 $testCase.DestinationPort = $port
                 $testCase.SourceId = $vm.vmId
+                $testCase.Protocol = $testProtocol
+                $testCase.ExpectedResult = $testExpectedResult
 
                 $testCases += $testCase
             }
@@ -517,18 +569,30 @@ foreach ($testCase in $testCases) {
     # correct for a bug in Test-AzNetworkWatcherConnectivity when testing against a VirtualMachine that is stopped
     $testCase.SourceId = $testCase.SourceId.Replace('/virtualmachines/', '/virtualMachines/')
 
-    $job = Test-AzNetworkWatcherConnectivity -ResourceGroupName $ResourceGroupName -NetworkWatcherName $NetworkWatcherName `
-        -SourceId $testCase.SourceId -SourcePort $testCase.SourcePort `
-        -DestinationAddress $testCase.DestinationAddress -DestinationPort $testCase.DestinationPort `
-        -AsJob
+    if ($testCase.Protocol -eq 'ICMP') {
+        $protocolConfig = [Microsoft.Azure.Commands.Network.Models.PSNetworkWatcherProtocolConfiguration]::new()
+        $protocolConfig.Protocol = $testCase.Protocol
+    
+        $job = Test-AzNetworkWatcherConnectivity -ResourceGroupName $ResourceGroupName -NetworkWatcherName $NetworkWatcherName `
+            -SourceId $testCase.SourceId `
+            -DestinationAddress $testCase.DestinationAddress `
+            -Protocol $protocolConfig `
+            -AsJob    
+    } else {
+        $job = Test-AzNetworkWatcherConnectivity -ResourceGroupName $ResourceGroupName -NetworkWatcherName $NetworkWatcherName `
+            -SourceId $testCase.SourceId -SourcePort $testCase.SourcePort `
+            -DestinationAddress $testCase.DestinationAddress -DestinationPort $testCase.DestinationPort `
+            -AsJob    
+    }
+
     $testCase.JobId = $job.Id
 
     $null = $jobIds.Add($job.Id)
-    Write-Verbose "Submitted - Source:$($testCase.SourceAddress):$($testCase.SourcePort) Destination:$($testCase.DestinationAddress):$($testCase.DestinationPort) JobId:$($testCase.JobId)"
+    Write-Verbose "Submitted - JobId:$($testCase.JobId) $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort)"
 }
 
 # get job results
-do {
+while ($jobIds.Count -ne 0) {
     try {
         $jobs = Wait-Job -Id $jobIds -Any -Timeout 15 
         if (-not $jobs) {
@@ -549,9 +613,11 @@ do {
         $testResult.SourcePort = $testCase.SourcePort
         $testResult.DestinationAddress = $testCase.DestinationAddress
         $testResult.DestinationPort = $testCase.DestinationPort
+        $testResult.Protocol = $testCase.Protocol
+        $testResult.ExpectedResult = $testCase.ExpectedResult
 
         if ($job.State -eq 'Completed') {
-            Write-Verbose "Completed - JobId:$($job.Id) Source:$($testResult.SourceAddress):$($testResult.SourcePort) Destination:$($testResult.DestinationAddress):$($testResult.DestinationPort)"
+            Write-Verbose "Completed - JobId:$($testCase.JobId) $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort)"
             $result = $job | Receive-Job
 
             $testResult.ConnectionStatus = $result.ConnectionStatus
@@ -564,13 +630,18 @@ do {
             $job | Remove-Job
         } else {
             $testResult.ConnectionStatus = "Job $($job.State)"
-            Write-Host "Failed - Job $($job.Id) state $($job.State). Source:$($testResult.SourceAddress):$($testResult.SourcePort) Destination:$($testResult.DestinationAddress):$($testResult.DestinationPort). Job left in queue." -ForegroundColor Red
+            Write-Host "Failed - Job $($job.Id) State:$($job.State). $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort). Job left in queue." -ForegroundColor Red
         }
-       
+
+        if ($testResult.ExpectedResult -eq $testResult.ConnectionStatus) {
+            $testResult.Result = 'Passed'
+        } else {
+            $testResult.Result = 'Failed'
+        }
+        
         $testResults += $testResult
         $jobIds.Remove($job.Id)
     }
-
-} until ($jobIds.Count -eq 0)
+} 
 
 $testResults
