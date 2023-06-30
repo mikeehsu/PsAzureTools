@@ -36,6 +36,12 @@ Specifies the expected result of the test. Valid values are Reachable and Unreac
 .PARAMETER FilePath
 Specifies the path to a CSV file containing the source and destination IP addresses and ports to test connectivity between. The file must contain a header row with the following column names: SourceAddress, SourcePort, DestinationAddress, DestinationPort. The script will ignore any other columns in the file.
 
+.PARAMETER MaxConcurrentTests
+Specifies the maximum number of concurrent tests to run. The default value is 50.
+
+.PARAMETER MaxRetry
+Specifies the maximum number of times to retry a failed test. The default value is 3.
+
 .EXAMPLE
 Test-NetworkWatcher.ps1 -ResourceGroupName "MyResourceGroup" -NetworkWatcherName "MyNetworkWatcher" -SourceAddress "10.0.0.4" -SourcePort "3389" -DestinationAddresses "10.0.0.5" -DestinationPorts 3389
 
@@ -72,8 +78,13 @@ Param(
     [string] $ExpectedResult = 'Reachable',
 
     [Parameter(ParameterSetName='FilePath')]
-    [string] $FilePath
+    [string] $FilePath,
 
+    [Parameter()]
+    [int] $MaxConcurrentTests = 50,
+
+    [Parameter()]
+    [int] $MaxRetry = 3
 )
 
 
@@ -375,7 +386,16 @@ Class TestCase {
     [string] $SourceId
     [string] $Protocol
     [string] $ExpectedResult
+    [string] $ConnectionStatus
+    [int] $AvgLatencyInMs
+    [int] $MinLatencyInMs
+    [int] $MaxLatencyInMs
+    [int] $ProbesSent
+    [int] $ProbesFailed
+    [array] $Hops
+    [string] $Result
     [int] $JobId
+    [int] $RetryCount = 0
 }
 
 class VmIpMap {
@@ -414,32 +434,23 @@ Resources
     }
 }
 
-class TestResult {
-    [string] $SourceAddress
-    [int] $SourcePort
-    [string] $DestinationAddress
-    [int] $DestinationPort
-    [string] $Protocol
-    [string] $ExpectedResult
-    [string] $ConnectionStatus
-    [int] $AvgLatencyInMs
-    [int] $MinLatencyInMs
-    [int] $MaxLatencyInMs
-    [int] $ProbesSent
-    [int] $ProbesFailed
-    [array] $Hops
-    [string] $Result
+# confirm user is logged into subscription
+try {
+    $result = Get-AzContext -ErrorAction Stop
+    if (-not $result.Subscription) {
+        Write-Error "Please login (Connect-AzAccount) and set the proper subscription (Set-AzContext) context before proceeding."
+        exit
+    }
+} catch {
+    Write-Error "Please login (Connect-AzAccount) and set the proper subscription (Set-AzContext) context before proceeding."
+    exit
 }
-
 
 # initialize variables
 $testCases = @()
-$testResults = @()
 
 # load VM map for source IP
 $vmMap = [VmIpMap]::New()
-
-# create protocol configuration
 
 # validate parameters
 if (-not ($FilePath -or $DestinationAddresses)) {
@@ -516,132 +527,144 @@ if ($FilePath) {
             }
 
             foreach ($port in $ports) {
-                if (-not $vm) {
-                    $testResult = [TestResult]::New()
-                    $testResult.SourceAddress = $row.SourceAddress
-                    $testResult.SourcePort = $row.SourcePort
-                    $testResult.DestinationAddress = $ip
-                    $testResult.DestinationPort = $port
-                    $testResult.Protocol = $testProtocol
-                    $testResult.ExpectedResult = $testExpectedResult
-                    $testResult.Result = 'TestNotRun'
-                    $testResult.ConnectionStatus = 'IP Address not found'
-        
-                    $testResults += $testResult
-                    Write-Host "IP address not found - $($row.SourceAddress)" -ForegroundColor Yellow
-                    continue
-                }
-        
-                if ($vm.powerState -ne 'VM running') {
-                    $testResult = [TestResult]::New()
-                    $testResult.SourceAddress = $row.SourceAddress
-                    $testResult.SourcePort = $row.SourcePort
-                    $testResult.DestinationAddress = $ip
-                    $testResult.DestinationPort = $port
-                    $testResult.Protocol = $testProtocol
-                    $testResult.ExpectedResult = $testExpectedResult
-                    $testResult.ConnectionStatus = $vm.powerState
-                    $testResult.Result = 'TestNotRun'
-        
-                    $testResults += $testResult
-                    Write-Host "VM not running - $($row.SourceAddress)" -ForegroundColor Yellow
-                    continue
-                }
-        
                 $testCase = [TestCase]::New()
                 $testCase.SourceAddress = $row.SourceAddress
                 $testCase.SourcePort = $row.SourcePort
                 $testCase.DestinationAddress = $ip
                 $testCase.DestinationPort = $port
-                $testCase.SourceId = $vm.vmId
                 $testCase.Protocol = $testProtocol
                 $testCase.ExpectedResult = $testExpectedResult
 
+                if (-not $vm) {
+                    $testCase.ConnectionStatus = 'IP Address not found'
+                    $testCase.Result = 'TestNotRun'
+                    $testCases += $testCase
+                    Write-Host "IP address not found - $($row.SourceAddress)" -ForegroundColor Yellow
+                    continue
+                }
+
+                # assign the VM for the test case
+                $testCase.SourceId = $vm.vmId
+        
+                if ($vm.powerState -ne 'VM running') {
+                    $testCase.ConnectionStatus = $vm.powerState
+                    $testCase.Result = 'TestNotRun'
+                    $testCases += $testCase
+                    Write-Host "VM not running - $($row.SourceAddress)" -ForegroundColor Yellow
+                    continue
+                }
+
+                # compensate for bug in Test-AzNetworkWatcherConnectivity 
+                # using pwsh 7.2 & Az.Network 5.1 all lower /virtualmachines throw error instead of completing test
+                $testCase.SourceId = $testCase.SourceId.Replace('/virtualmachines/', '/virtualMachines/')
                 $testCases += $testCase
             }
         }
     }
 }
 
-# submit jobs 
-$jobIds =  [System.Collections.ArrayList] @()
-foreach ($testCase in $testCases) {
-    # correct for a bug in Test-AzNetworkWatcherConnectivity when testing against a VirtualMachine that is stopped
-    $testCase.SourceId = $testCase.SourceId.Replace('/virtualmachines/', '/virtualMachines/')
+# submit jobs
+$totalTests = $testCases.Count
+$testLeft = @($testCases | Where-Object {-not $_.Result}).Count
+while ($testLeft -gt 0) {
 
-    if ($testCase.Protocol -eq 'ICMP') {
-        $protocolConfig = [Microsoft.Azure.Commands.Network.Models.PSNetworkWatcherProtocolConfiguration]::new()
-        $protocolConfig.Protocol = $testCase.Protocol
-    
-        $job = Test-AzNetworkWatcherConnectivity -ResourceGroupName $ResourceGroupName -NetworkWatcherName $NetworkWatcherName `
-            -SourceId $testCase.SourceId `
-            -DestinationAddress $testCase.DestinationAddress `
-            -Protocol $protocolConfig `
-            -AsJob    
-    } else {
-        $job = Test-AzNetworkWatcherConnectivity -ResourceGroupName $ResourceGroupName -NetworkWatcherName $NetworkWatcherName `
-            -SourceId $testCase.SourceId -SourcePort $testCase.SourcePort `
-            -DestinationAddress $testCase.DestinationAddress -DestinationPort $testCase.DestinationPort `
-            -AsJob    
+    # submit more tests
+    $slotsLeft = $MaxConcurrentTests - @($testCases | Where-Object {$_.JobId}).Count
+    foreach ($testCase in $testCases) {
+        if ($slotsLeft -le 0) {
+            break
+        }
+
+        if ($testCase.Result -or $testCase.JobId) {
+            continue
+        }
+
+        if ($testCase.RetryCount -gt $MaxRetry) {
+            $testCase.Result = 'TestNotComplete'
+            $testCase.ConnectionStatus = 'Max retries exceeded'
+            $testCase.RetryCount--
+            continue
+        }
+
+        if ($testCase.Protocol -eq 'ICMP') {
+            $protocolConfig = [Microsoft.Azure.Commands.Network.Models.PSNetworkWatcherProtocolConfiguration]::new()
+            $protocolConfig.Protocol = $testCase.Protocol
+        
+            $job = Test-AzNetworkWatcherConnectivity -ResourceGroupName $ResourceGroupName -NetworkWatcherName $NetworkWatcherName `
+                -SourceId $testCase.SourceId `
+                -DestinationAddress $testCase.DestinationAddress `
+                -Protocol $protocolConfig `
+                -AsJob    
+        } else {
+            $job = Test-AzNetworkWatcherConnectivity -ResourceGroupName $ResourceGroupName -NetworkWatcherName $NetworkWatcherName `
+                -SourceId $testCase.SourceId -SourcePort $testCase.SourcePort `
+                -DestinationAddress $testCase.DestinationAddress -DestinationPort $testCase.DestinationPort `
+                -AsJob    
+        }
+
+        $testCase.JobId = $job.Id
+        
+        if ($testCase.RetryCount -gt 0) {
+            Write-Verbose "Retry ($($testCase.RetryCount)) - JobId:$($testCase.JobId) $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort)" 
+        } else {
+            Write-Verbose "Submitted - JobId:$($testCase.JobId) $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort)" 
+        }
+      
+        $slotsLeft--
     }
 
-    $testCase.JobId = $job.Id
-
-    $null = $jobIds.Add($job.Id)
-    Write-Verbose "Submitted - JobId:$($testCase.JobId) $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort)"
-}
-
-# get job results
-while ($jobIds.Count -ne 0) {
+    # track progress on jobs
     try {
-        $jobs = Wait-Job -Id $jobIds -Any -Timeout 15 
-        if (-not $jobs) {
-            Write-Verbose "Waiting on $($jobIds.Count) job(s) to complete..."
-            continue
-        }    
+        $jobIds = [array] @($testCases | Where-Object {$_.JobId}).JobId
+        if ($jobIds.Count -gt 0) {
+            $jobs = Wait-Job -Id $jobIds -Any -Timeout 15 
+            if (-not $jobs) {
+                Write-Verbose "Waiting on $($jobIds.Count) job(s) to complete..."
+                continue
+            }        
+        }
     } catch {
         throw $_
         break
     }
 
+    # process completed jobs
     foreach ($job in $jobs) {
         # find original test case
         $testCase = $testCases | Where-Object {$_.JobId -eq $job.Id}
 
-        $testResult = [TestResult]::New()
-        $testResult.SourceAddress = $testCase.SourceAddress
-        $testResult.SourcePort = $testCase.SourcePort
-        $testResult.DestinationAddress = $testCase.DestinationAddress
-        $testResult.DestinationPort = $testCase.DestinationPort
-        $testResult.Protocol = $testCase.Protocol
-        $testResult.ExpectedResult = $testCase.ExpectedResult
-
         if ($job.State -eq 'Completed') {
-            Write-Verbose "Completed - JobId:$($testCase.JobId) $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort)"
             $result = $job | Receive-Job
+            
+            $testCase.ConnectionStatus = $result.ConnectionStatus
+            $testCase.AvgLatencyInMs = $result.AvgLatencyInMs
+            $testCase.MinLatencyInMs = $result.MinLatencyInMs
+            $testCase.MaxLatencyInMs = $result.MaxLatencyInMs
+            $testCase.ProbesSent = $result.ProbesSent
+            $testCase.ProbesFailed = $result.ProbesFailed   
+            $testCase.Hops = $result.Hops | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+            
+            if ($testCase.ExpectedResult -eq $testCase.ConnectionStatus) {
+                $testCase.Result = 'Passed'
+            } else {
+                $testCase.Result = 'Failed'
+            }
 
-            $testResult.ConnectionStatus = $result.ConnectionStatus
-            $testResult.AvgLatencyInMs = $result.AvgLatencyInMs
-            $testResult.MinLatencyInMs = $result.MinLatencyInMs
-            $testResult.MaxLatencyInMs = $result.MaxLatencyInMs
-            $testResult.ProbesSent = $result.ProbesSent
-            $testResult.ProbesFailed = $result.ProbesFailed   
-            $testResult.Hops = $result.Hops | ConvertTo-Json -Depth 5 | ConvertFrom-Json
-            $job | Remove-Job
+            Write-Verbose "Completed - $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort) - $($testCase.ConnectionStatus)/$($testCase.Result)"
+
         } else {
-            $testResult.ConnectionStatus = "Job $($job.State)"
-            Write-Host "Failed - Job $($job.Id) State:$($job.State). $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort). Job left in queue." -ForegroundColor Red
+            $testCase.RetryCount++
+            $testCase.ConnectionStatus = "Job $($job.State) - $($job.StatusMessage)"
+
+            Write-Host "$($job.State) - Job $($job.Id) $($job.StatusMessage). $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort)" -ForegroundColor Red
         }
 
-        if ($testResult.ExpectedResult -eq $testResult.ConnectionStatus) {
-            $testResult.Result = 'Passed'
-        } else {
-            $testResult.Result = 'Failed'
-        }
-        
-        $testResults += $testResult
-        $jobIds.Remove($job.Id)
+        $job | Remove-Job
+        $testCase.JobId = $null
     }
-} 
 
-$testResults
+    $testLeft = @($testCases | Where-Object {-not $_.Result}).Count
+    Write-Progress -Activity "Running tests" -Status "$($totalTests-$testLeft) of $($totalTests) tests complete" -PercentComplete (($totalTests-$testLeft)/$totalTests * 100)
+}
+
+$testCases
