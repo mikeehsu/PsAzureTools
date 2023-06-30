@@ -539,6 +539,8 @@ if ($FilePath) {
                     $testCase.ConnectionStatus = 'IP Address not found'
                     $testCase.Result = 'TestNotRun'
                     $testCases += $testCase
+
+                    Write-Output $testCase
                     Write-Host "IP address not found - $($row.SourceAddress)" -ForegroundColor Yellow
                     continue
                 }
@@ -550,6 +552,8 @@ if ($FilePath) {
                     $testCase.ConnectionStatus = $vm.powerState
                     $testCase.Result = 'TestNotRun'
                     $testCases += $testCase
+
+                    Write-Output $testCase
                     Write-Host "VM not running - $($row.SourceAddress)" -ForegroundColor Yellow
                     continue
                 }
@@ -583,6 +587,8 @@ while ($testLeft -gt 0) {
             $testCase.Result = 'TestNotComplete'
             $testCase.ConnectionStatus = 'Max retries exceeded'
             $testCase.RetryCount--
+
+            Write-Output $testCase
             continue
         }
 
@@ -650,6 +656,7 @@ while ($testLeft -gt 0) {
                 $testCase.Result = 'Failed'
             }
 
+            Write-Output $testCase
             Write-Verbose "Completed - $($testCase.Protocol)/$($testCase.SourceAddress):$($testCase.SourcePort) -> $($testCase.DestinationAddress):$($testCase.DestinationPort) - $($testCase.ConnectionStatus)/$($testCase.Result)"
 
         } else {
@@ -666,5 +673,3 @@ while ($testLeft -gt 0) {
     $testLeft = @($testCases | Where-Object {-not $_.Result}).Count
     Write-Progress -Activity "Running tests" -Status "$($totalTests-$testLeft) of $($totalTests) tests complete" -PercentComplete (($totalTests-$testLeft)/$totalTests * 100)
 }
-
-$testCases
