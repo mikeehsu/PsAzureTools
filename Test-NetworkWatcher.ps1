@@ -403,25 +403,20 @@ class VmIpMap {
 
     VmIpMap() {
         # load IP address of all VMs in the subscription
-        $query = @"
-Resources
-    | where type =~ 'microsoft.compute/virtualmachines'
-    | project vmId = tolower(tostring(id)), vmName = name, powerState = tostring(properties.extended.instanceView.powerState.displayStatus)
-    | join (Resources
-        | where type =~ 'microsoft.network/networkinterfaces'
-        | mv-expand ipconfig=properties.ipConfigurations
-        | project vmId = tolower(tostring(properties.virtualMachine.id)), privateIp = ipconfig.properties.privateIPAddress, publicIpId = tostring(ipconfig.properties.publicIPAddress.id)
-        | join kind=leftouter (Resources
-            | where type =~ 'microsoft.network/publicipaddresses'
-            | project publicIpId = id, publicIp = properties.ipAddress
-        ) on publicIpId
-        | project-away publicIpId, publicIpId1
-        | summarize privateIps = make_list(privateIp), publicIps = make_list(publicIp) by vmId
-    ) on vmId
-    | project-away vmId1
-    | sort by vmName asc
-"@
-        [VmIpMap]::vms = Search-AzGraph -Query $query
+        [VmIpMap]::vms = @()
+        $nics = Get-AzNetworkInterface | Where-Object { $null -ne $_.VirtualMachine }
+        foreach ($nic in $nics) {
+            [VmIpMap]::vms += [PSCustomObject]@{
+                vmId = $nic.VirtualMachine.Id
+                privateIps = $nic.IpConfigurations.PrivateIpAddress
+                powerState = $null
+            }    
+        }
+
+        $vmsState = Get-AzVm -Status | Select-Object -Property Id, Powerstate
+        foreach ($vm in [VmIpMap]::vms) {
+            $vm.powerState = $vmsState | Where-Object { $_.Id -eq $vm.vmId } | Select-Object -ExpandProperty Powerstate
+        }
     }
 
     [PSCustomObject] GetVmByIpAddress($ipAddress) {
@@ -457,6 +452,9 @@ if (-not ($FilePath -or $DestinationAddresses)) {
     Write-Error 'Either -FilePath ore -ToIpAddresses must be supplied.'
     return
 }
+
+# start a timer
+$stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
 # build test cases from command line
 if ($DestinationAddresses) {
@@ -625,7 +623,7 @@ while ($testLeft -gt 0) {
         if ($jobIds.Count -gt 0) {
             $jobs = Wait-Job -Id $jobIds -Any -Timeout 15 
             if (-not $jobs) {
-                Write-Verbose "Waiting on $($jobIds.Count) job(s) to complete..."
+                Write-Verbose "Waiting on $($jobIds.Count) job(s) to complete...($($stopwatch.Elapsed))"
                 continue
             }        
         }
@@ -673,3 +671,5 @@ while ($testLeft -gt 0) {
     $testLeft = @($testCases | Where-Object {-not $_.Result}).Count
     Write-Progress -Activity "Running tests" -Status "$($totalTests-$testLeft) of $($totalTests) tests complete" -PercentComplete (($totalTests-$testLeft)/$totalTests * 100)
 }
+
+Write-Host "Done. ($($stopwatch.Elapsed) elapsed)"
