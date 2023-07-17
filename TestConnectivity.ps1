@@ -45,36 +45,36 @@ This parameter sets the waiting period for connections before the attempt is con
 Param(
 
     [Parameter(ParameterSetName = 'IpAddress', ValueFromPipeline, ValueFromPipelineByPropertyName)]
-    [Alias("IpAddress", "AddressPrefixes", "AddressPrefix")]
+    [Alias('IpAddress', 'AddressPrefixes', 'AddressPrefix')]
     [string[]] $IpAddresses,
 
     [Parameter(Mandatory = $false)]
-    [Alias("Port")]
+    [Alias('Port')]
     [int[]] $Ports,
 
-    [Parameter(ParameterSetNam = 'FilePath', Mandatory = $false)]
+    [Parameter(ParameterSetName = 'FilePath')]
     [string] $FilePath,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter()]
     [switch] $Details,
 
     [Parameter(Mandatory = $false)]
     [string] $OutputPath,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter()]
     [switch] $Continuous,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter()]
     [switch] $OnlyShowPassed,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter()]
     [switch] $OnlyShowFailed,
 
     [Parameter(Mandatory = $false)]
     [int] $Frequency = 5,
 
     [Parameter(Mandatory = $false)]
-    [int] $TimeOut = 500
+    [int] $TimeOut = 1000
 )
 
 Set-StrictMode -Version Latest
@@ -135,15 +135,15 @@ Function Get-IPv4NetworkInfo {
 
     Param
     (
-        [Parameter(ParameterSetName = "IPandMask", Mandatory = $true)]
+        [Parameter(ParameterSetName = 'IPandMask', Mandatory = $true)]
         [ValidateScript( { $_ -match [ipaddress]$_ })]
         [System.String] $IPAddress,
 
-        [Parameter(ParameterSetName = "IPandMask", Mandatory = $true)]
+        [Parameter(ParameterSetName = 'IPandMask', Mandatory = $true)]
         [ValidateScript( { $_ -match [ipaddress]$_ })]
         [System.String] $SubnetMask,
 
-        [Parameter(ParameterSetName = "CIDR", Mandatory = $true)]
+        [Parameter(ParameterSetName = 'CIDR', Mandatory = $true)]
         [ValidateScript( { $_ -match '^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/([0-9]|[0-2][0-9]|3[0-2])$' })]
         [System.String] $CIDRAddress,
 
@@ -252,15 +252,15 @@ Function Get-IPv4NetworkInfo {
     $obj = New-Object -TypeName psobject
 
     # Add our properties to it
-    Add-Member -InputObject $obj -MemberType NoteProperty -Name "IPAddress"         -Value $IPAddress
-    Add-Member -InputObject $obj -MemberType NoteProperty -Name "SubnetMask"        -Value $SubnetMask
-    Add-Member -InputObject $obj -MemberType NoteProperty -Name "NetworkAddress"    -Value $NetworkAddress
-    Add-Member -InputObject $obj -MemberType NoteProperty -Name "BroadcastAddress"  -Value $BroadcastAddress
-    Add-Member -InputObject $obj -MemberType NoteProperty -Name "WildcardMask"      -Value $WildcardMask
-    Add-Member -InputObject $obj -MemberType NoteProperty -Name "NumberOfHostIPs"   -Value $NumberOfHosts
-    Add-Member -InputObject $obj -MemberType NoteProperty -Name "HostMinIp"         -Value $HostMinIP
-    Add-Member -InputObject $obj -MemberType NoteProperty -Name "HostMaxIp"         -Value $HostMaxIP
-    Add-Member -InputObject $obj -MemberType NoteProperty -Name "IPRange"           -Value $IPRange
+    Add-Member -InputObject $obj -MemberType NoteProperty -Name 'IPAddress'         -Value $IPAddress
+    Add-Member -InputObject $obj -MemberType NoteProperty -Name 'SubnetMask'        -Value $SubnetMask
+    Add-Member -InputObject $obj -MemberType NoteProperty -Name 'NetworkAddress'    -Value $NetworkAddress
+    Add-Member -InputObject $obj -MemberType NoteProperty -Name 'BroadcastAddress'  -Value $BroadcastAddress
+    Add-Member -InputObject $obj -MemberType NoteProperty -Name 'WildcardMask'      -Value $WildcardMask
+    Add-Member -InputObject $obj -MemberType NoteProperty -Name 'NumberOfHostIPs'   -Value $NumberOfHosts
+    Add-Member -InputObject $obj -MemberType NoteProperty -Name 'HostMinIp'         -Value $HostMinIP
+    Add-Member -InputObject $obj -MemberType NoteProperty -Name 'HostMaxIp'         -Value $HostMaxIP
+    Add-Member -InputObject $obj -MemberType NoteProperty -Name 'IPRange'           -Value $IPRange
 
     # Return the object
     return $obj
@@ -271,18 +271,18 @@ function GetIpInRange {
 
     Param(
         [parameter(Mandatory = $true)]
-        [ValidatePattern("\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")]
+        [ValidatePattern('\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b')]
         [string] $StartIpAddress,
 
-        [parameter(Mandatory = $false)]
-        [ValidatePattern("\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")]
+        [parameter()]
+        [ValidatePattern('\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b')]
         [string] $EndIpAddress = $StartIPAddress
     )
 
     $ipSet = @()
 
-    $startOctets = $StartIpAddress.Split(".")
-    $endOctets = $EndIpAddress.Split(".")
+    $startOctets = $StartIpAddress.Split('.')
+    $endOctets = $EndIpAddress.Split('.')
 
     if ($startOctets[0] -ne $endOctets[0]) {
         Write-Error 'Too large an IP range. Please break into smaller ranges'
@@ -424,11 +424,11 @@ if ($FilePath) {
 
     $testFile = Import-Csv -Path $FilePath -Delimiter ','
 
-    if ($testFile | Get-member -MemberType 'NoteProperty' | Where-Object { $_.Name -eq 'PortsToTest' }) {
+    if ($testFile | Get-Member -MemberType 'NoteProperty' | Where-Object { $_.Name -eq 'PortsToTest' }) {
         $portsToTestIncluded = $true
     }
 
-    if ($testFile | Get-member -MemberType 'NoteProperty' | Where-Object { $_.Name -eq 'PortsExpected' }) {
+    if ($testFile | Get-Member -MemberType 'NoteProperty' | Where-Object { $_.Name -eq 'PortsExpected' }) {
         $portsExpectedIncluded = $true
     }
 
@@ -483,7 +483,7 @@ do {
         }
     }
 
-    # wait for results -- since we're doing in parallel, we don't need to wait this, but it's easier
+    # wait for results -- wait the timeout period to give all connections the chance to complete
     Start-Sleep -Milli $TimeOut
 
     # check results
