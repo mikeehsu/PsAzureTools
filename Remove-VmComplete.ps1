@@ -273,7 +273,7 @@ try {
     #region ResourceGroup, if nothing else inside
     if (-not $KeepResourceGroup) {
         Write-Verbose "Checking ResourceGroup $ResourceGroupName"
-        $resources = Get-AzResource | Where-Object { $_.ResourceGroupName -eq "$ResourceGroupName" }
+        $resources = Get-AzResource -ResourceGroupName$ ResourceGroupName -ErrorAction 'Stop'
         if (-not $resources) {
             if ($Force -or $PSCmdlet.ShouldProcess("$ResourceGroupName", "Remove-AzResourceGroup")) {
                 Write-Verbose "Removing resource group $ResourceGroupName"
