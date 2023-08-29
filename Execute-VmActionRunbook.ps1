@@ -91,6 +91,9 @@ Param (
 
     [Parameter(Mandatory = $false)]
     [boolean] $Whatif = $false
+
+    [Parameter()]
+    [string] $Environment = 'AzureCloud'
 )
 
 function InvokeRunCommand {
@@ -161,7 +164,7 @@ function ExecuteAction {
         [Parameter()]
         [boolean] $WhatIf = $false
     )
-    
+
     $vm = Get-AzVM -ResourceGroupName $ResourceGroupName -Name $Name
     if (-not $vm) {
         Write-Error "$($vm.ResourceGroupName)/$($vm.Name) VM not found. Unable to $Action."
@@ -182,7 +185,7 @@ function ExecuteAction {
         elseif ($Action -eq 'Shutdown') {
             if ($vm.StorageProfile.OsDisk.OsType -eq 'Windows') {
                 Write-Host "$($vm.ResourceGroupName)/$($vm.Name) (windows) shutting down ..." -NoNewline
-                $result = $vm | InvokeRunCommand -CommandId RunPowerShellScript -ScriptString 'Stop-Computer -ComputerName localhost -Force' -WhatIf:$WhatIf 
+                $result = $vm | InvokeRunCommand -CommandId RunPowerShellScript -ScriptString 'Stop-Computer -ComputerName localhost -Force' -WhatIf:$WhatIf
 
             }
             elseif ($vm.StorageProfile.OsDisk.OsType -eq 'Linux') {
@@ -402,7 +405,7 @@ try {
         $results = Disable-AzContextAutosave -Scope Process
 
         # Connect to Azure with system-assigned managed identity
-        $connection = Connect-AzAccount -Environment AzureUSGovernment -Identity -ErrorAction Stop
+        $connection = Connect-AzAccount -Environment $Environment -Identity -ErrorAction Stop
         $context = $connection.context
         Write-Host "New connection as $($context.Account.Id)"
     }
