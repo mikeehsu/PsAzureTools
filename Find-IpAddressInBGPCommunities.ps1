@@ -229,9 +229,19 @@ function CompareSubnet {
     $network2, [int] $subnetlen2 = $addr2.Split('/')
 
     #Convert network address to binary
-    [uint32] $unetwork1 = NetworkToBinary $network1
-    [uint32] $unetwork2 = NetworkToBinary $network2
-
+    try {
+        [uint32] $unetwork1 = NetworkToBinary $network1
+        [uint32] $unetwork2 = NetworkToBinary $network2
+    }
+    catch {
+        Write-Error "Unable to convert network address to binary: $($_.Exception.Message)"
+        Write-Error "Network Address: $network1"
+        Write-Error "Network Address: $network2"
+        return [PSCustomObject] @{
+            Condition = $false
+            Direction = ''
+        }
+    }
     #Check if subnet length exists and is less then 32(/32 is host, single ip so no calculation needed) if so convert to binary
     $mask1 = $null
     if ($subnetlen1 -lt 32) {
@@ -378,7 +388,7 @@ function IsIpAddressInCIDR {
         [string] $CIDRAddress
     )
 
-    $result = CompareSubnet -addr1 $IPAddress -addr2 $CIDRAddress
+    $result = CompareSubnet -addr1 $IPAddress -addr2 $CIDRAddress -ErrorAction Continue
     return ($result.Condition -and $result.Direction -eq 'LessThan')
 }
 
@@ -416,6 +426,10 @@ foreach ($serviceCommunity in $serviceCommunities) {
     Write-Verbose "Checking service: $($serviceCommunity.Name)"
     forEach ($bgpCommunity in $serviceCommunity.BgpCommunities) {
         forEach ($addressPrefix in $bgpCommunity.CommunityPrefixes) {
+            if ($addressPrefix.Contains(':')) {
+                # skip any IPv6 for now
+                Continue
+            }
             if ($(IsIpAddressInCIDR -IPAddress $ipaddress -CIDRAddress $addressPrefix)) {
                 $foundCommunities += [PSCustomObject] @{
                     Name                 = $serviceCommunity.name
