@@ -93,7 +93,14 @@ foreach ($serviceCommunity in $serviceCommunities) {
 Write-Progress -Activity "Searching for $ipAddress" -Completed
 $foundCommunities
 
+# no communities found
+if (-not $foundCommunities) {
+    Write-Host "No BGP communities found for $($ips.Network -join ', ')"
+    return
+}
+
+# list any IPs that were not found in the BGP Communities
 $notFound = $ips | Where-Object {$foundCommunities.IpAddress -notcontains $_.Network}
 if ($notFound) {
-    Write-Host "No entries found for $($notFound.Network -join ', ')"
+    Write-Host "No BGP communities found for $($notFound.Network -join ', ')"
 }
