@@ -91,7 +91,7 @@ try {
 
     $docsContainer = Get-AzStorageContainer -Context $storageAccount.Context -Name 'documents' -ErrorAction SilentlyContinue
     if (-not $docsContainer) {
-        $docsContainer = New-AzStorageContainer -Context $storageAccount.Context -Name 'documents' -PublicAccess Blob
+        $docsContainer = New-AzStorageContainer -Context $storageAccount.Context -Name 'documents'
     }
 
     $sasToken = $docsContainer | New-AzStorageContainerSASToken -Permission c
