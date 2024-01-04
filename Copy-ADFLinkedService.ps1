@@ -232,6 +232,7 @@ foreach ($linkedService in $sourceLinkedServices) {
     $newService = New-ADFLinkedService -SubscriptionId $DestinationSubscriptionId -ResourceGroupName $DestinationResourceGroupName -ADFName $DestinationADFName -LinkedServiceName $linkedServiceName -PropertiesJson $newServiceJson
     if (-not $newService) {
         Write-Error "Failed to create linked service '$linkedServiceName' in destination data factory ($DestinationResourceGroupName/$DestinationADFName)."
+    } else {
+        Write-Host "$($newService.Name) created."
     }
-    Write-Host "$($newService.Name) created."
 }
