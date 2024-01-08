@@ -135,7 +135,7 @@ function New-SynapseLinkedService
 
         $results = Invoke-AzRestMethod -Uri $location.value[0] -Method GET
         if ($results.StatusCode -eq 202) {
-            Write-Host "Creating linked service $LinkedServiceName...$($($results.Content | ConvertFrom-Json).status)"
+            Write-Host "$LinkedServiceName...$($($results.Content | ConvertFrom-Json).status)"
         }
 
     } while ($results.StatusCode -eq 202)
