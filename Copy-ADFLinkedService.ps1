@@ -101,7 +101,7 @@ function Get-ADFLinkedServiceDetail
 
     $results = Invoke-AzRestMethod @param -Method GET
     if ($results.StatusCode -ne 200) {
-        Write-Error "Failed to get linked service: $($results.Content)"
+        Write-Error "Failed getting linked service: $($results.Content)"
         return $null
     }
 
@@ -140,7 +140,7 @@ function New-ADFLinkedService
 
     $results = Invoke-AzRestMethod @param -Method PUT
     if ($results.StatusCode -ne 200) {
-        Write-Error "Failed to create linked service: $($results.Content)"
+        Write-Error "Failed creating linked service: $($results.Content)"
         return $null
     }
 
@@ -210,13 +210,15 @@ if (-not $sourceLinkedServices) {
     return
 }
 
+$sourceLinkedServices = $sourceLinkedServices | Sort-Object -Property Name
+
+# loop through and copy all datasets identified
+$completeCount = 0
+$failedCount = 0
+$failedNames = @()
 foreach ($linkedService in $sourceLinkedServices) {
-    Write-Host "Copying Linked Service: $($linkedService.Name)"
-    $linkedServiceDetails = Get-ADFLinkedServiceDetail -SubscriptionId $SourceSubscriptionId -ResourceGroupName $SourceResourceGroupName -ADFName $SourceADFName -LinkedServiceName $linkedService.Name
-    if (-not $linkedServiceDetails) {
-        Write-Error "Linked service '$SourceLinkedServiceName' not found in source data factory ($SourceResourceGroupName/$sourceDataFactory)."
-        return
-    }
+    Write-Progress -Activity "Copy Linked Services" -Status "$completeCount of $($sourceLinkedServices.Count)" -PercentComplete ($completeCount / $sourceLinkedServices.Count * 100)
+    Write-Host "$($linkedService.Name)...working" -NoNewline
 
     # build name for destination linked service
     $linkedServiceName = $DestinationLinkedServiceName
@@ -225,14 +227,37 @@ foreach ($linkedService in $sourceLinkedServices) {
     }
     $linkedServiceName = $linkedServiceName + $Suffix
 
+    # get details of linked service
+    $linkedServiceDetails = Get-ADFLinkedServiceDetail -SubscriptionId $SourceSubscriptionId -ResourceGroupName $SourceResourceGroupName -ADFName $SourceADFName -LinkedServiceName $linkedService.Name
+    if (-not $linkedServiceDetails) {
+        $failedCount++
+        $failedNames += $linkedService.Name
+        Write-Host "`r$($linkedService.Name)...FAILED"
+        Write-Error "Linked service '$SourceLinkedServiceName' not found in source data factory ($SourceResourceGroupName/$sourceDataFactory)."
+        return
+    }
+
     # create JSON for new linked service
     $newServiceJson = @{ properties = ($linkedServiceDetails.Properties) } | ConvertTo-Json -Depth 10
 
     # create new linked service
     $newService = New-ADFLinkedService -SubscriptionId $DestinationSubscriptionId -ResourceGroupName $DestinationResourceGroupName -ADFName $DestinationADFName -LinkedServiceName $linkedServiceName -PropertiesJson $newServiceJson
     if (-not $newService) {
+        $failedCount++
+        $failedNames = $failedNames + $linkedService.Name
+        Write-Host "`r$($linkedService.Name)...FAILED"
         Write-Error "Failed to create linked service '$linkedServiceName' in destination data factory ($DestinationResourceGroupName/$DestinationADFName)."
     } else {
-        Write-Host "$($newService.Name) created."
+        $successCount++
+        Write-Host "`r$linkedServiceName...created"
     }
+
+    $completeCount++
+}
+
+Write-Host "$successCount linked service created/updated."
+Write-Host "$failedCount linked service copy failed."
+
+if ($failedCount -gt 0) {
+    Write-Host "Failed Linked Services: $($failedNames -join ', ')"
 }
