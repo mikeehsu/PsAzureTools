@@ -71,8 +71,66 @@ param (
     [string] $DestinationLinkedServiceName,
 
     [Parameter()]
-    [string] $Suffix = ''
+    [string] $Suffix = '',
+
+    [Parameter()]
+    [switch] $Overwrite
 )
+
+
+
+function Get-SynapseWorkspaceDetails
+{
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [string] $SubscriptionId,
+
+        [Parameter(Mandatory)]
+        [string] $ResourceGroupName,
+
+        [Parameter(Mandatory)]
+        [alias("Name")]
+        [string] $WorkspaceName
+    )
+
+    $context = Get-AzContext
+    if (-not $context) {
+        Write-Error "Unable to get AzContext, please login (Connect-AzAccount) before proceeding." -ErrorAction Stop
+        return $null
+    }
+
+    if (-not $SubscriptionId) {
+        $SubscriptionId = $context.Subscription.Id
+        if (-not $SubscriptionId) {
+            Write-Error "Unable to get SubscriptionId from AzContext, please set a subscription context before proceeding." -ErrorAction Stop
+            return $null
+        }
+    }
+
+    $params = @{
+        SubscriptionId = $SubscriptionId
+        ResourceGroupName = $ResourceGroupName
+        ResourceProviderName = "Microsoft.Synapse"
+        ResourceType = "workspaces"
+        Name = $WorkspaceName
+        ApiVersion = "2019-06-01-preview"
+    }
+
+    Write-Host $($params | convertto-json)
+
+    $uri = "$($context.Environment.ResourceManagerUrl)subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Synapse/workspaces/$($WorkspaceName)?api-version=2019-06-01-preview"
+    Write-Host $uri
+
+    $results = Invoke-AzRestMethod -Method GET @params
+    if ($results.StatusCode -ne 200) {
+        Write-Error "Unable to find workspace $($WorkspaceName): $($results.Content)"
+        return $null
+    }
+
+    return ($results.Content | ConvertFrom-Json).value
+}
+
 
 function Get-SynapseLinkedService
 {
@@ -81,7 +139,7 @@ function Get-SynapseLinkedService
         [PSCustomObject] $Synapse
     )
 
-    $uri = "$($Synapse.properties.connectivityEndpoints.dev)/linkedServices?api-version=2019-06-01-preview"
+    $uri = "$($Synapse.connectivityEndpoints.dev)/linkedServices?api-version=2019-06-01-preview"
 
     $results = Invoke-AzRestMethod -Uri $uri -Method GET
     if ($results.StatusCode -ne 200) {
@@ -106,14 +164,14 @@ function New-SynapseLinkedService
     )
 
 
-    $uri = "$($Synapse.properties.connectivityEndpoints.dev)/linkedServices/$($LinkedServiceName)?api-version=2019-06-01-preview"
+    $uri = "$($Synapse.connectivityEndpoints.dev)/linkedServices/$($LinkedServiceName)?api-version=2019-06-01-preview"
     $payload = @{
         name = $LinkedServiceName
         properties = $Properties
     } | ConvertTo-Json -Depth 10
 
 
-    Write-Host "$LinkedServiceName...creating"
+    Write-Verbose "$LinkedServiceName...creating"
     # Write-Host $uri
     # Write-Host $payload
 
@@ -135,7 +193,7 @@ function New-SynapseLinkedService
 
         $results = Invoke-AzRestMethod -Uri $location.value[0] -Method GET
         if ($results.StatusCode -eq 202) {
-            Write-Host "$LinkedServiceName...$($($results.Content | ConvertFrom-Json).status)"
+            Write-Verbose "$LinkedServiceName...$($($results.Content | ConvertFrom-Json).status)"
         }
 
     } while ($results.StatusCode -eq 202)
@@ -151,7 +209,7 @@ function New-SynapseLinkedService
         return $null
     }
 
-    Write-Host "$LinkedServiceName...created"
+    Write-Verbose "$LinkedServiceName...created"
 
     return ($results.Content | ConvertFrom-Json)
 }
@@ -188,33 +246,32 @@ catch {
     return
 }
 
-
 # double-check login to both source & destination subscriptions
 $context = Set-AzContext -SubscriptionId $DestinationSubscriptionId -ErrorAction Stop
 if (-not $context) {
     Write-Error "Failed to verify context for subscription '$DestinationSubscriptionId'."
     return
 }
+$destinationSynapse = Get-AzSynapseWorkspace -ResourceGroupName $DestinationResourceGroupName -Name $DestinationWorkspaceName -ErrorAction Stop
+if (-not $destinationSynapse) {
+    Write-Error "Unable to find Destination Synapse workspace $DestinationResourceGroupName/$DestinationWorkspaceName"
+    return
+}
+
 
 $context = Set-AzContext -SubscriptionId $SourceSubscriptionId -ErrorAction Stop
 if (-not $context) {
     Write-Error "Failed to verify context for subscription '$SourceSubscriptionId'."
     return
 }
-
-$sourceSynapse = Get-SynapseWorkspaceDetails -SubscriptionId $SourceSubscriptionId -ResourceGroupName $SourceResourceGroupName -Name $SourceWorkspaceName -ErrorAction Stop
+$sourceSynapse = Get-AzSynapseWorkspace -ResourceGroupName $SourceResourceGroupName -Name $SourceWorkspaceName -ErrorAction Stop
 if (-not $sourceSynapse) {
     Write-Error "Unable to find Source Synapse workspace $SourceResourceGroupName/$SourceWorkspaceName"
     return
 }
 
-$destinationSynapse = Get-SynapseWorkspaceDetails -SubscriptionId $DestinationSubscriptionId -ResourceGroupName $DestinationResourceGroupName -Name $DestinationWorkspaceName -ErrorAction Stop
-if (-not $destinationSynapse) {
-    Write-Error "Unable to find Destination Synapse workspace $DestinationResourceGroupName/$DestinationWorkspaceName"
-    return
-}
 
-$sourceLinkedServices = Get-SynapseLinkedService -Synapse $synapse -ErrorAction Stop
+$sourceLinkedServices = Get-SynapseLinkedService -Synapse $sourceSynapse -ErrorAction Stop
 if (-not $sourceLinkedServices) {
     Write-Error "No linked services found in $SourceResourceGroupName/$SourceWorkspaceName"
     return
@@ -234,21 +291,40 @@ if ($SourceLinkedServiceName) {
 # get list of linked services in destination workspace
 $destinationLinkedServices = Get-SynapseLinkedService -Synapse $destinationSynapse -ErrorAction Stop
 
+$successCount = 0
+$failedCount = 0
+$failedNames = @()
 foreach ($linkedService in $sourceLinkedServices) {
-    $DestinationLinkedServiceName = $linkedService.name + $Suffix
+    Write-Progress -Activity "Copy Linked Services" -Status "$($successCount+$failedCount) of $($sourceLinkedServices.Count) complete" -PercentComplete ($completeCount / $sourceLinkedServices.Count * 100)
 
-    Write-Host "Copying '$($linkedService.name)' to '$DestinationLinkedServiceName'"
+    # build name for destination linked service
+    $linkedServiceName = $DestinationLinkedServiceName
+    if (-not $linkedServiceName) {
+        $linkedServiceName = $linkedService.Name
+    }
+    $linkedServiceName = $linkedServiceName + $Suffix
+
+    Write-Host "$($linkedService.Name)...working" -NoNewline
 
     # check if linked service already exists
-    $destinationLinkedService = $destinationLinkedServices | Where-Object { $_.name -eq $DestinationLinkedServiceName }
-    if ($destinationLinkedService) {
-        Write-Error "'$DestinationLinkedServiceName' already exists in $DestinationResourceGroupName/$DestinationWorkspaceName"
+    $destinationLinkedService = $destinationLinkedServices | Where-Object { $_.name -eq $linkedServiceName }
+    if ($destinationLinkedService -and -not $Overwrite) {
+        $failedCount++
+        $failedNames += $linkedServiceName
+        Write-Host "`r$($linkedServiceName)...SKIPPED (already exists))"
+        Write-Error "$linkedServiceName already exists in $DestinationResourceGroupName/$DestinationWorkspaceName"
         continue
     }
 
     # create linked service
-    $result = New-SynapseLinkedService -Synapse $destinationSynapse -LinkedServiceName $DestinationLinkedServiceName -Properties $linkedService.Properties
-    if (-not $result) {
-        Write-Error "$DestinationLinkedServiceName creation failed."
+    $newService = New-SynapseLinkedService -Synapse $destinationSynapse -LinkedServiceName $linkedServiceName -Properties $linkedService.Properties
+    if (-not $newService) {
+        $failedCount++
+        $failedNames = $failedNames + $linkedService.Name
+        Write-Host "`r$($linkedService.Name)...FAILED"
+        Write-Error "Failed to create linked service '$linkedServiceName' in destination data factory ($DestinationResourceGroupName/$DestinationADFName)."
+    } else {
+        $successCount++
+        Write-Host "`r$linkedServiceName...created"
     }
 }
