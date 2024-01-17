@@ -78,60 +78,6 @@ param (
 )
 
 
-
-function Get-SynapseWorkspaceDetails
-{
-    [CmdletBinding()]
-    param (
-        [Parameter()]
-        [string] $SubscriptionId,
-
-        [Parameter(Mandatory)]
-        [string] $ResourceGroupName,
-
-        [Parameter(Mandatory)]
-        [alias("Name")]
-        [string] $WorkspaceName
-    )
-
-    $context = Get-AzContext
-    if (-not $context) {
-        Write-Error "Unable to get AzContext, please login (Connect-AzAccount) before proceeding." -ErrorAction Stop
-        return $null
-    }
-
-    if (-not $SubscriptionId) {
-        $SubscriptionId = $context.Subscription.Id
-        if (-not $SubscriptionId) {
-            Write-Error "Unable to get SubscriptionId from AzContext, please set a subscription context before proceeding." -ErrorAction Stop
-            return $null
-        }
-    }
-
-    $params = @{
-        SubscriptionId = $SubscriptionId
-        ResourceGroupName = $ResourceGroupName
-        ResourceProviderName = "Microsoft.Synapse"
-        ResourceType = "workspaces"
-        Name = $WorkspaceName
-        ApiVersion = "2019-06-01-preview"
-    }
-
-    Write-Host $($params | convertto-json)
-
-    $uri = "$($context.Environment.ResourceManagerUrl)subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Synapse/workspaces/$($WorkspaceName)?api-version=2019-06-01-preview"
-    Write-Host $uri
-
-    $results = Invoke-AzRestMethod -Method GET @params
-    if ($results.StatusCode -ne 200) {
-        Write-Error "Unable to find workspace $($WorkspaceName): $($results.Content)"
-        return $null
-    }
-
-    return ($results.Content | ConvertFrom-Json).value
-}
-
-
 function Get-SynapseLinkedService
 {
     param (
