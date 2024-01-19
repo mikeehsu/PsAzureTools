@@ -261,7 +261,7 @@ foreach ($pipeline in $sourcePipelines) {
     $completeCount++
 }
 
-Write-Host "$completeCount pipelines created/updated."
+Write-Host "$successCount pipelines created/updated."
 Write-Host "$failedCount pipeline copy failed."
 
 if ($failedCount -gt 0) {
