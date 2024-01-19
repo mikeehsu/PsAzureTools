@@ -15,7 +15,7 @@
     The name of the source Azure Synapse workspace. This is mandatory.
 
 .PARAMETER SourceLinkedServiceName
-    The name of the linked service in the source Azure Synapse workspace to be copied. This is optional. If this is not supplied, all linked services will be copied.
+    The name of the linked service in the source Azure Synapse workspace to be copied. If this is not supplied, all linked services will be copied.
 
 .PARAMETER DestinationSubscriptionId
     The subscription ID of the destination Azure Synapse workspace. This is optional.
@@ -27,7 +27,7 @@
     The name of the destination Azure Synapse workspace. This is mandatory.
 
 .PARAMETER DestinationLinkedServiceName
-    The name of the linked service in the destination Azure Synapse workspace. This is optional.
+    The name of the linked service in the destination Azure Synapse workspace. This is only used when copying a single linked service. If this is not supplied, the name of the linked service in the source Azure Synapse workspace will be used.
 
 .PARAMETER Suffix
     A suffix to append to the name of the copied linked service. This is optional.
@@ -192,7 +192,7 @@ catch {
     return
 }
 
-# double-check login to both source & destination subscriptions
+# get destination workspace
 $context = Set-AzContext -SubscriptionId $DestinationSubscriptionId -ErrorAction Stop
 if (-not $context) {
     Write-Error "Failed to verify context for subscription '$DestinationSubscriptionId'."
@@ -204,7 +204,11 @@ if (-not $destinationSynapse) {
     return
 }
 
+# get destination linkedservices
+$destinationLinkedServices = Get-SynapseLinkedService -Synapse $destinationSynapse -ErrorAction Stop
 
+
+# get source workspace
 $context = Set-AzContext -SubscriptionId $SourceSubscriptionId -ErrorAction Stop
 if (-not $context) {
     Write-Error "Failed to verify context for subscription '$SourceSubscriptionId'."
@@ -216,26 +220,27 @@ if (-not $sourceSynapse) {
     return
 }
 
-
+# get source linkedservices
 $sourceLinkedServices = Get-SynapseLinkedService -Synapse $sourceSynapse -ErrorAction Stop
 if (-not $sourceLinkedServices) {
     Write-Error "No linked services found in $SourceResourceGroupName/$SourceWorkspaceName"
     return
 }
 
-# filter down lihkedServices to just the one we want
+# only one linked service to copy, if specified
 if ($SourceLinkedServiceName) {
-    $sourceLinkedServices = $sourceLinkedServices | Where-Object { $_.name -eq $SourceLinkedServiceName }
-    if (-not $linkedServices) {
+    $linkedService = $sourceLinkedServices | Where-Object { $_.name -eq $SourceLinkedServiceName }
+    if (-not $linkedService) {
         Write-Error "Unable to find linked service '$SourceLinkedServiceName' in $SourceResourceGroupName/$SourceWorkspaceName"
         return
     }
 
-    $sourceLinkedServices = @($sourceLinkedServices)
+    # convert to array
+    $sourceLinkedServices = @($linkedService)
 }
 
-# get list of linked services in destination workspace
-$destinationLinkedServices = Get-SynapseLinkedService -Synapse $destinationSynapse -ErrorAction Stop
+# sort list of linkedservices to copy
+$sourceLinkedServices = $sourceLinkedServices | Sort-Object -Property Name
 
 $successCount = 0
 $failedCount = 0
@@ -250,7 +255,7 @@ foreach ($linkedService in $sourceLinkedServices) {
     }
     $linkedServiceName = $linkedServiceName + $Suffix
 
-    Write-Host "$($linkedService.Name)...working" -NoNewline
+    Write-Host "$linkedServiceName...working" -NoNewline
 
     # check if linked service already exists
     $destinationLinkedService = $destinationLinkedServices | Where-Object { $_.name -eq $linkedServiceName }
@@ -266,11 +271,18 @@ foreach ($linkedService in $sourceLinkedServices) {
     $newService = New-SynapseLinkedService -Synapse $destinationSynapse -LinkedServiceName $linkedServiceName -Properties $linkedService.Properties
     if (-not $newService) {
         $failedCount++
-        $failedNames = $failedNames + $linkedService.Name
-        Write-Host "`r$($linkedService.Name)...FAILED"
+        $failedNames = $failedNames + $linkedServiceName
+        Write-Host "`r$($linkedServiceName)...FAILED"
         Write-Error "Failed to create linked service '$linkedServiceName' in destination data factory ($DestinationResourceGroupName/$DestinationADFName)."
     } else {
         $successCount++
         Write-Host "`r$linkedServiceName...created"
     }
+}
+
+Write-Host "$successCount linked service created/updated."
+Write-Host "$failedCount linked service failed."
+
+if ($failedCount -gt 0) {
+    Write-Host "Failed Linked Services: $($failedNames -join ', ')"
 }
