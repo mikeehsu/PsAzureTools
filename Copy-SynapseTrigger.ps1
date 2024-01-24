@@ -37,6 +37,7 @@
 
 .EXAMPLE
     .\Copy-SynapseTrigger.ps1 -SourceSubscriptionId <value> -SourceResourceGroupName <value> -SourceWorkspaceName <value> -SourceTriggerName <value> -DestinationSubscriptionId <value> -DestinationResourceGroupName <value> -DestinationWorkspaceName <value> -DestinationTriggerName <value> -Suffix <value> -Overwrite
+
     Replace <value> with the appropriate value for each parameter.
 
 #>
@@ -153,14 +154,15 @@ function New-SynapseTrigger
 
     } while ($results.StatusCode -eq 202)
 
+    # Write-Verbose "$TriggerName...$($results.Content)"
     if ($results.StatusCode -ne 200) {
         Write-Error "Failed to create trigger: $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
 
     $content = $results.Content | ConvertFrom-Json
-    if (-not $content.PSobject.Properties.name -like 'id') {
-        Write-Error "Failed to create trigger: $($results | ConvertTo-Json -Depth 10)"
+    if (-not ($content.PSobject.Properties.name -like 'id')) {
+        Write-Error "Failed to create $($TriggerName): $($content.error | ConvertTo-Json -Depth 10)"
         return $null
     }
 
@@ -254,10 +256,11 @@ if ($SourceTriggerName) {
 $sourceTriggers = $sourceTriggers | Sort-Object -Property Name
 
 $successCount = 0
+$skipCount = 0
 $failedCount = 0
 $failedNames = @()
 foreach ($trigger in $sourceTriggers) {
-    Write-Progress -Activity "Copy Triggers" -Status "$($successCount+$failedCount) of $($sourceTriggers.Count) complete" -PercentComplete ($successCount+$failedCount / $sourceTriggers.Count * 100)
+    Write-Progress -Activity "Copy Triggers" -Status "$($successCount+$skipCount+$skipCount+$failedCount) of $($sourceLinkedServices.Count) complete" -PercentComplete (($successCount+$failedCount+$skipCount) / $sourceTriggers.Count * 100)
 
     # build name for destination trigger
     $triggerName = $DestinationTriggerName
@@ -271,10 +274,8 @@ foreach ($trigger in $sourceTriggers) {
     # check if trigger already exists
     $destinationTrigger = $destinationTriggers | Where-Object { $_.name -eq $triggerName }
     if ($destinationTrigger -and -not $Overwrite) {
-        $failedCount++
-        $failedNames += $triggerName
+        $skipCount++
         Write-Host "`r$($triggerName)...SKIPPED (already exists))"
-        Write-Error "$triggerName already exists in $DestinationResourceGroupName/$DestinationWorkspaceName"
         continue
     }
 
@@ -292,8 +293,10 @@ foreach ($trigger in $sourceTriggers) {
 }
 
 Write-Host "$successCount triggers created/updated."
+Write-Host "$skipCount triggers skipped."
 Write-Host "$failedCount triggers failed."
 
 if ($failedCount -gt 0) {
+    Write-Host
     Write-Host "Failed datasets: $($failedNames -join ', ')"
 }

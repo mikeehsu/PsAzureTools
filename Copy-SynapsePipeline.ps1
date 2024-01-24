@@ -37,8 +37,12 @@
 
 .EXAMPLE
     .\Copy-SynapsePipeline.ps1 -SourceSubscriptionId <value> -SourceResourceGroupName <value> -SourceWorkspaceName <value> -SourcePipelineName <value> -DestinationSubscriptionId <value> -DestinationResourceGroupName <value> -DestinationWorkspaceName <value> -DestinationPipelineName <value> -Suffix <value> -Overwrite
+
     Replace <value> with the appropriate value for each parameter.
-#>
+
+
+    #>
+
 
 [CmdletBinding()]
 param (
@@ -159,13 +163,8 @@ function New-SynapsePipeline
     }
 
     $content = $results.Content | ConvertFrom-Json
-    if (-not $content.PSobject.Properties.name -like 'id') {
-        Write-Error "Failed to create ($PipelineName): $($results | ConvertTo-Json -Depth 10)"
-        return $null
-    }
-
-    if ($content.PSobject.Properties.name -like 'status' -and $content.status -eq 'Failed') {
-        Write-Error "Failed to create $($PipelineName): $($content.error | ConvertTo-Json -Depth 10)"
+    if (-not ($content.PSobject.Properties.name -like 'id')) {
+        Write-Error "Failed to create ($PipelineName): $($content.error | ConvertTo-Json -Depth 10)"
         return $null
     }
 
@@ -260,10 +259,11 @@ if ($SourcePipelineName) {
 $sourcePipelines = $sourcePipelines | Sort-Object -Property Name
 
 $successCount = 0
+$skipCount = 0
 $failedCount = 0
 $failedNames = @()
 foreach ($pipeline in $sourcePipelines) {
-    Write-Progress -Activity "Copy Pipelines" -Status "$($successCount+$failedCount) of $($sourcePipelines.Count) complete" -PercentComplete ($successCount+$failedCount / $sourcePipelines.Count * 100)
+    Write-Progress -Activity "Copy Pipelines" -Status "$($successCount+$skipCount+$skipCount+$failedCount) of $($sourceLinkedServices.Count) complete" -PercentComplete (($successCount+$failedCount+$skipCount) / $sourcePipelines.Count * 100)
 
     # build name for destination pipeline
     $pipelineName = $DestinationPipelineName
@@ -277,9 +277,8 @@ foreach ($pipeline in $sourcePipelines) {
     # check if pipeline already exists
     $destinationPipeline = $destinationPipelines | Where-Object { $_.name -eq $pipelineName }
     if ($destinationPipeline -and -not $Overwrite) {
-        $failedCount++
-        $failedNames += $pipelineName
-        Write-Host "`r$($pipelineName)...SKIPPED (already exists))"
+        $skipCount++
+        Write-Host "`r$($pipelineName)...SKIPPED (already exists)"
         continue
     }
 
@@ -297,8 +296,10 @@ foreach ($pipeline in $sourcePipelines) {
 }
 
 Write-Host "$successCount pipelines created/updated."
+Write-Host "$skipCount pipelines skipped."
 Write-Host "$failedCount pipelines failed."
 
 if ($failedCount -gt 0) {
+    Write-Host
     Write-Host "Failed datasets: $($failedNames -join ', ')"
 }

@@ -156,23 +156,17 @@ function New-SynapseLinkedService
 
     } while ($results.StatusCode -eq 202)
 
-    # Write-Verbose "$LinkedServiceName...$($results.Content)"
+    Write-Verbose "$LinkedServiceName...$($results.Content)"
     if ($results.StatusCode -ne 200) {
         Write-Error "Failed to create $($LinkedServiceName): $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
 
     $content = $results.Content | ConvertFrom-Json
-    if (-not $content.PSobject.Properties.name -like 'id') {
-        Write-Error "Failed to create $($LinkedServiceName): $($results | ConvertTo-Json -Depth 10)"
-        return $null
-    }
-
-    if ($content.PSobject.Properties.name -like 'status' -and $content.status -eq 'Failed') {
+    if (-not ($content.PSobject.Properties.name -like 'id')) {
         Write-Error "Failed to create $($LinkedServiceName): $($content.error | ConvertTo-Json -Depth 10)"
         return $null
     }
-
 
     Write-Verbose "$LinkedServiceName...created"
 
@@ -263,10 +257,11 @@ if ($SourceLinkedServiceName) {
 $sourceLinkedServices = $sourceLinkedServices | Sort-Object -Property Name
 
 $successCount = 0
+$skipCount = 0
 $failedCount = 0
 $failedNames = @()
 foreach ($linkedService in $sourceLinkedServices) {
-    Write-Progress -Activity "Copy LinkedServices" -Status "$($successCount+$failedCount) of $($sourceLinkedServices.Count) complete" -PercentComplete ($successCount+$failedCount / $sourceLinkedServices.Count * 100)
+    Write-Progress -Activity "Copy LinkedServices" -Status "$($successCount+$skipCount+$skipCount+$failedCount) of $($sourceLinkedServices.Count) complete" -PercentComplete (($successCount+$failedCount+$skipCount) / $sourceLinkedServices.Count * 100)
 
     # build name for destination LinkedService
     $linkedServiceName = $DestinationLinkedServiceName
@@ -280,9 +275,8 @@ foreach ($linkedService in $sourceLinkedServices) {
     # check if LinkedService already exists
     $destinationLinkedService = $destinationLinkedServices | Where-Object { $_.name -eq $linkedServiceName }
     if ($destinationLinkedService -and -not $Overwrite) {
-        $failedCount++
-        $failedNames += $linkedServiceName
-        Write-Host "`r$($linkedServiceName)...SKIPPED (already exists))"
+        $skipCount++
+        Write-Host "`r$($linkedServiceName)...SKIPPED (already exists)"
         continue
     }
 
@@ -300,8 +294,10 @@ foreach ($linkedService in $sourceLinkedServices) {
 }
 
 Write-Host "$successCount LinkedServices created/updated."
+Write-Host "$skipCount LinkedServices skipped."
 Write-Host "$failedCount LinkedServices failed."
 
 if ($failedCount -gt 0) {
+    Write-Host
     Write-Host "Failed LinkedServices: $($failedNames -join ', ')"
 }
