@@ -131,35 +131,41 @@ function New-SynapsePipeline
 
     $results = Invoke-AzRestMethod -Uri $uri -Method PUT -Payload $payload
     if ($results.StatusCode -ne 202) {
-        Write-Error "Failed to create pipeline: $($results | ConvertTo-Json -Depth 10)"
+        Write-Error "Failed to create $($PipelineName): $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
 
-
+    # check status of request
     do {
         Start-Sleep -Seconds 5
 
         $location = $results.headers | Where-Object {$_.key -eq 'Location'}
         if (-not $location) {
-            Write-Error "Failed to create pipeline: $($results | ConvertTo-Json -Depth 10)"
+            Write-Error "Failed to create ($PipelineName): $($results | ConvertTo-Json -Depth 10)"
             return $null
         }
 
         $results = Invoke-AzRestMethod -Uri $location.value[0] -Method GET
         if ($results.StatusCode -eq 202) {
-            Write-Verbose "$PipelineName...$($($results.Content | ConvertFrom-Json).status)"
+            Write-Verbose "$($PipelineName)...$($($results.Content | ConvertFrom-Json).status)"
         }
 
     } while ($results.StatusCode -eq 202)
 
+    # Write-Verbose "$LinkedServiceName...$($results.Content)"
     if ($results.StatusCode -ne 200) {
-        Write-Error "Failed to create pipeline: $($results | ConvertTo-Json -Depth 10)"
+        Write-Error "Failed to create ($PipelineName): $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
 
     $content = $results.Content | ConvertFrom-Json
     if (-not $content.PSobject.Properties.name -like 'id') {
-        Write-Error "Failed to create pipeline: $($results | ConvertTo-Json -Depth 10)"
+        Write-Error "Failed to create ($PipelineName): $($results | ConvertTo-Json -Depth 10)"
+        return $null
+    }
+
+    if ($content.PSobject.Properties.name -like 'status' -and $content.status -eq 'Failed') {
+        Write-Error "Failed to create $($PipelineName): $($content.error | ConvertTo-Json -Depth 10)"
         return $null
     }
 
@@ -274,7 +280,6 @@ foreach ($pipeline in $sourcePipelines) {
         $failedCount++
         $failedNames += $pipelineName
         Write-Host "`r$($pipelineName)...SKIPPED (already exists))"
-        Write-Error "$pipelineName already exists in $DestinationResourceGroupName/$DestinationWorkspaceName"
         continue
     }
 
@@ -284,7 +289,7 @@ foreach ($pipeline in $sourcePipelines) {
         $failedCount++
         $failedNames = $failedNames + $pipelineName
         Write-Host "`r$($pipelineName)...FAILED"
-        Write-Error "Failed to create pipeline '$pipelineName' in destination data factory ($DestinationResourceGroupName/$DestinationADFName)."
+        Write-Error "Failed to create pipeline '$pipelineName' in destination data factory ($DestinationResourceGroupName/$DestinationWorkspaceName)."
     } else {
         $successCount++
         Write-Host "`r$pipelineName...created"
