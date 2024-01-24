@@ -81,15 +81,27 @@ function Get-SynapsePipeline
         [PSCustomObject] $Synapse
     )
 
+    $pipelines = @()
     $uri = "$($Synapse.connectivityEndpoints.dev)/pipelines?api-version=2019-06-01-preview"
 
-    $results = Invoke-AzRestMethod -Uri $uri -Method GET
-    if ($results.StatusCode -ne 200) {
-        Write-Error "Failed to get pipeline: $($results.Content)"
-        return $null
-    }
+    do {
+        $results = Invoke-AzRestMethod -Uri $uri -Method GET
+        if ($results.StatusCode -ne 200) {
+            Write-Error "Failed to get pipeline: $($results.Content)"
+            return $null
+        }
 
-    return ($results.Content | ConvertFrom-Json).value
+        $content = $results.Content | ConvertFrom-Json
+        $pipelines += $content.value
+
+        if ($content.PSobject.Properties.name -like 'nextLink') {
+            $uri = $content.nextLink
+        } else {
+            $uri = $null
+        }
+    } while ($uri)
+
+    return $pipelines
 }
 
 function New-SynapsePipeline
@@ -146,7 +158,7 @@ function New-SynapsePipeline
     }
 
     $content = $results.Content | ConvertFrom-Json
-    if (-not $content.id) {
+    if (-not $content.PSobject.Properties.name -like 'id') {
         Write-Error "Failed to create pipeline: $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
@@ -159,6 +171,8 @@ function New-SynapsePipeline
 ##
 ## MAIN
 ##
+
+Set-StrictMode -Version 2
 
 # check parameters
 if (-not $SourceSubscriptionId) {
@@ -243,7 +257,7 @@ $successCount = 0
 $failedCount = 0
 $failedNames = @()
 foreach ($pipeline in $sourcePipelines) {
-    Write-Progress -Activity "Copy Pipelines" -Status "$($successCount+$failedCount) of $($sourcePipelines.Count) complete" -PercentComplete ($completeCount / $sourcePipelines.Count * 100)
+    Write-Progress -Activity "Copy Pipelines" -Status "$($successCount+$failedCount) of $($sourcePipelines.Count) complete" -PercentComplete ($successCount+$failedCount / $sourcePipelines.Count * 100)
 
     # build name for destination pipeline
     $pipelineName = $DestinationPipelineName
