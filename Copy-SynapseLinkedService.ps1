@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    This script copies linkedservices from one Azure Synapse workspace to another.
+    This script copies LinkedServices from one Azure Synapse workspace to another.
 
 .DESCRIPTION
-    The script uses the Azure Synapse REST API to copy linkedservices. It can be used to copy a single linkedservice or all linkedservices from the source Azure Synapse workspace.
+    The script uses the Azure Synapse REST API to copy LinkedServices. It can be used to copy a single LinkedService or all LinkedServices from the source Azure Synapse workspace.
 
 .PARAMETER SourceSubscriptionId
     The subscription ID of the source Azure Synapse workspace. This is optional.
@@ -15,7 +15,7 @@
     The name of the source Azure Synapse workspace. This is mandatory.
 
 .PARAMETER SourceLinkedServiceName
-    The name of the linkedservice in the source Azure Synapse workspace to be copied. If this is not supplied, all linkedservices will be copied.
+    The name of the LinkedService in the source Azure Synapse workspace to be copied. If this is not supplied, all LinkedServices will be copied.
 
 .PARAMETER DestinationSubscriptionId
     The subscription ID of the destination Azure Synapse workspace. This is optional.
@@ -27,20 +27,20 @@
     The name of the destination Azure Synapse workspace. This is mandatory.
 
 .PARAMETER DestinationLinkedServiceName
-    The name of the linkedservice in the destination Azure Synapse workspace. This is only used when copying a single linkedservice. If this is not supplied, the name of the linkedservice in the source Azure Synapse workspace will be used.
+    The name of the LinkedService in the destination Azure Synapse workspace. This is only used when copying a single LinkedService. If this is not supplied, the name of the LinkedService in the source Azure Synapse workspace will be used.
 
 .PARAMETER Suffix
-    A suffix to append to the name of the copied linkedservice. This is optional.
+    A suffix to append to the name of the copied LinkedService. This is optional.
 
 .EXAMPLE
     .\Copy-SynapseLinkedService.ps1 -SourceResourceGroupName "sourceRG" -SourceWorkspaceName "sourceWorkspace" -DestinationResourceGroupName "destinationRG" -DestinationWorkspaceName "destinationWorkspace"
 
-    This example copies all linkedservices from the source Azure Synapse workspace to the destination Azure Synapse workspace.
+    This example copies all LinkedServices from the source Azure Synapse workspace to the destination Azure Synapse workspace.
 
 .EXAMPLE
     .\Copy-SynapseLinkedService.ps1 -SourceResourceGroupName "sourceRG" -SourceWorkspaceName "sourceWorkspace" -SourceLinkedServiceName "sourceLS" -DestinationResourceGroupName "destinationRG" -DestinationWorkspaceName "destinationWorkspace" -DestinationLinkedServiceName "destinationLS"
 
-    This example copies a specific linkedservice from the source Azure Synapse workspace to the destination Azure Synapse workspace.
+    This example copies a specific LinkedService from the source Azure Synapse workspace to the destination Azure Synapse workspace.
 
 #>
 
@@ -91,7 +91,7 @@ function Get-SynapseLinkedService
     do {
         $results = Invoke-AzRestMethod -Uri $uri -Method GET
         if ($results.StatusCode -ne 200) {
-            Write-Error "Failed to get linkedservice: $($results.Content)"
+            Write-Error "Failed to get LinkedService: $($results.Content)"
             return $null
         }
 
@@ -107,7 +107,6 @@ function Get-SynapseLinkedService
 
     return $linkedservices
 }
-
 
 function New-SynapseLinkedService
 {
@@ -136,37 +135,44 @@ function New-SynapseLinkedService
 
     $results = Invoke-AzRestMethod -Uri $uri -Method PUT -Payload $payload
     if ($results.StatusCode -ne 202) {
-        Write-Error "Failed to create linkedservice: $($results | ConvertTo-Json -Depth 10)"
+        Write-Error "Failed to create $($LinkedServiceName): $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
 
-
+    # check status of request
     do {
         Start-Sleep -Seconds 5
 
         $location = $results.headers | Where-Object {$_.key -eq 'Location'}
         if (-not $location) {
-            Write-Error "Failed to create linkedservice: $($results | ConvertTo-Json -Depth 10)"
+            Write-Error "Failed to create $($LinkedServiceName): $($results | ConvertTo-Json -Depth 10)"
             return $null
         }
 
         $results = Invoke-AzRestMethod -Uri $location.value[0] -Method GET
         if ($results.StatusCode -eq 202) {
-            Write-Verbose "$LinkedServiceName...$($($results.Content | ConvertFrom-Json).status)"
+            Write-Verbose "$($LinkedServiceName)...$($($results.Content | ConvertFrom-Json).status)"
         }
 
     } while ($results.StatusCode -eq 202)
 
+    # Write-Verbose "$LinkedServiceName...$($results.Content)"
     if ($results.StatusCode -ne 200) {
-        Write-Error "Failed to create linkedservice: $($results | ConvertTo-Json -Depth 10)"
+        Write-Error "Failed to create $($LinkedServiceName): $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
 
     $content = $results.Content | ConvertFrom-Json
     if (-not $content.PSobject.Properties.name -like 'id') {
-        Write-Error "Failed to create linkedservice: $($results | ConvertTo-Json -Depth 10)"
+        Write-Error "Failed to create $($LinkedServiceName): $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
+
+    if ($content.PSobject.Properties.name -like 'status' -and $content.status -eq 'Failed') {
+        Write-Error "Failed to create $($LinkedServiceName): $($content.error | ConvertTo-Json -Depth 10)"
+        return $null
+    }
+
 
     Write-Verbose "$LinkedServiceName...created"
 
@@ -218,7 +224,7 @@ if (-not $destinationSynapse) {
     return
 }
 
-# get destination linkedservices
+# get destination LinkedServices
 $destinationLinkedServices = Get-SynapseLinkedService -Synapse $destinationSynapse -ErrorAction Stop
 
 
@@ -234,18 +240,18 @@ if (-not $sourceSynapse) {
     return
 }
 
-# get source linkedservices
+# get source LinkedServices
 $sourceLinkedServices = Get-SynapseLinkedService -Synapse $sourceSynapse -ErrorAction Stop
 if (-not $sourceLinkedServices) {
-    Write-Error "No linkedservices found in $SourceResourceGroupName/$SourceWorkspaceName"
+    Write-Error "No LinkedServices found in $SourceResourceGroupName/$SourceWorkspaceName"
     return
 }
 
-# only one linkedservice to copy, if specified
+# only one LinkedService to copy, if specified
 if ($SourceLinkedServiceName) {
     $linkedService = $sourceLinkedServices | Where-Object { $_.name -eq $SourceLinkedServiceName }
     if (-not $linkedService) {
-        Write-Error "Unable to find linkedservice '$SourceLinkedServiceName' in $SourceResourceGroupName/$SourceWorkspaceName"
+        Write-Error "Unable to find LinkedService '$SourceLinkedServiceName' in $SourceResourceGroupName/$SourceWorkspaceName"
         return
     }
 
@@ -253,7 +259,7 @@ if ($SourceLinkedServiceName) {
     $sourceLinkedServices = @($linkedService)
 }
 
-# sort list of linkedservices to copy
+# sort list of LinkedServices to copy
 $sourceLinkedServices = $sourceLinkedServices | Sort-Object -Property Name
 
 $successCount = 0
@@ -262,7 +268,7 @@ $failedNames = @()
 foreach ($linkedService in $sourceLinkedServices) {
     Write-Progress -Activity "Copy LinkedServices" -Status "$($successCount+$failedCount) of $($sourceLinkedServices.Count) complete" -PercentComplete ($successCount+$failedCount / $sourceLinkedServices.Count * 100)
 
-    # build name for destination linkedservice
+    # build name for destination LinkedService
     $linkedServiceName = $DestinationLinkedServiceName
     if (-not $linkedServiceName) {
         $linkedServiceName = $linkedService.Name
@@ -271,31 +277,30 @@ foreach ($linkedService in $sourceLinkedServices) {
 
     Write-Host "$linkedServiceName...working" -NoNewline
 
-    # check if linkedservice already exists
+    # check if LinkedService already exists
     $destinationLinkedService = $destinationLinkedServices | Where-Object { $_.name -eq $linkedServiceName }
     if ($destinationLinkedService -and -not $Overwrite) {
         $failedCount++
         $failedNames += $linkedServiceName
         Write-Host "`r$($linkedServiceName)...SKIPPED (already exists))"
-        Write-Error "$linkedServiceName already exists in $DestinationResourceGroupName/$DestinationWorkspaceName"
         continue
     }
 
-    # create linkedservice
+    # create LinkedService
     $newService = New-SynapseLinkedService -Synapse $destinationSynapse -LinkedServiceName $linkedServiceName -Properties $linkedService.Properties
     if (-not $newService) {
         $failedCount++
         $failedNames = $failedNames + $linkedServiceName
         Write-Host "`r$($linkedServiceName)...FAILED"
-        Write-Error "Failed to create linkedservice '$linkedServiceName' in destination data factory ($DestinationResourceGroupName/$DestinationADFName)."
+        Write-Error "Failed to create LinkedService '$linkedServiceName' in destination data factory ($DestinationResourceGroupName/$DestinationWorkspaceName)."
     } else {
         $successCount++
         Write-Host "`r$linkedServiceName...created"
     }
 }
 
-Write-Host "$successCount linkedservice created/updated."
-Write-Host "$failedCount linkedservice failed."
+Write-Host "$successCount LinkedServices created/updated."
+Write-Host "$failedCount LinkedServices failed."
 
 if ($failedCount -gt 0) {
     Write-Host "Failed LinkedServices: $($failedNames -join ', ')"
