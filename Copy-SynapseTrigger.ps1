@@ -82,15 +82,27 @@ function Get-SynapseTrigger
         [PSCustomObject] $Synapse
     )
 
+    $triggers = @()
     $uri = "$($Synapse.connectivityEndpoints.dev)/triggers?api-version=2019-06-01-preview"
 
-    $results = Invoke-AzRestMethod -Uri $uri -Method GET
-    if ($results.StatusCode -ne 200) {
-        Write-Error "Failed to get trigger: $($results.Content)"
-        return $null
-    }
+    do {
+        $results = Invoke-AzRestMethod -Uri $uri -Method GET
+        if ($results.StatusCode -ne 200) {
+            Write-Error "Failed to get trigger: $($results.Content)"
+            return $null
+        }
 
-    return ($results.Content | ConvertFrom-Json).value
+        $content = $results.Content | ConvertFrom-Json
+        $triggers += $content.value
+
+        if ($content.PSobject.Properties.name -like 'nextLink') {
+            $uri = $content.nextLink
+        } else {
+            $uri = $null
+        }
+    } while ($uri)
+
+    return $triggers
 }
 
 function New-SynapseTrigger
@@ -147,7 +159,7 @@ function New-SynapseTrigger
     }
 
     $content = $results.Content | ConvertFrom-Json
-    if (-not $content.id) {
+    if (-not $content.PSobject.Properties.name -like 'id') {
         Write-Error "Failed to create trigger: $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
@@ -160,6 +172,7 @@ function New-SynapseTrigger
 ##
 ## MAIN
 ##
+Set-StrictMode -Version 2
 
 # check parameters
 if (-not $SourceSubscriptionId) {
@@ -244,7 +257,7 @@ $successCount = 0
 $failedCount = 0
 $failedNames = @()
 foreach ($trigger in $sourceTriggers) {
-    Write-Progress -Activity "Copy Triggers" -Status "$($successCount+$failedCount) of $($sourceTriggers.Count) complete" -PercentComplete ($completeCount / $sourceTriggers.Count * 100)
+    Write-Progress -Activity "Copy Triggers" -Status "$($successCount+$failedCount) of $($sourceTriggers.Count) complete" -PercentComplete ($successCount+$failedCount / $sourceTriggers.Count * 100)
 
     # build name for destination trigger
     $triggerName = $DestinationTriggerName
