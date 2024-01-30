@@ -25,7 +25,7 @@ $supportedFields = @(
     ,'city'
     ,'postalCode'
 #   ,'telephoneNumber'
-    ,'mobilePhone'
+    ,'mobile    dPhone'
 #   ,'alternateEmailAddress'
     ,'ageGroup'
     ,'consentProvidedForMinor'
@@ -62,8 +62,6 @@ catch {
     Write-Error "Please login (Connect-MgGraph -Scope 'User.ReadWrite.All') and set the proper tenant (Set-MgContext) context before proceeding."
     retrun
 }
-
-# Connect-MgGraph -TenantId  1abe43f1-aa90-4b69-8ea0-56d263646592 -Scope "User.ReadWrite.All"
 
 $rows = Import-Csv -Path $Path
 
