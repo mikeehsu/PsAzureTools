@@ -1,3 +1,80 @@
+<#
+.SYNOPSIS
+    Manages metadata related to databases, tables, and columns in Azure Purview.
+
+.DESCRIPTION
+    This script provides a set of parameters for interacting with Azure Purview. It allows you to manage metadata associated with databases, tables, and columns. Use this script to streamline metadata operations within your Azure environment.
+
+.PARAMETER Path
+    Specifies the path to the CSV metadata file.
+
+.PARAMETER ResourceGroupName
+    The name of the Azure Resource Group.
+
+.PARAMETER PurviewAccountName
+    The name of the Azure Purview Account.
+
+.PARAMETER DbServerName
+    The name of the database server. This database server name will be applied to the entire file. This parameter cannot be used with -DbServerHeader.
+
+.PARAMETER DbServerHeader
+    The header of the column that contains the database server name. This parameter cannot be used with -DbServerName.
+
+.PARAMETER DbInstanceName
+    The name of the database instance (default: 'MSSQLSERVER'). This database instance name will be applied to the entire file. This cannot be used with -DbInstanceHeader.
+
+.PARAMETER DbInstanceHeader
+    The header of the column that contains the database instance name. This cannot be used with -DbInstanceName.
+
+.PARAMETER SchemaName
+    The name of the database schema (default: 'dbo'). This database schema name will be applied to the entire file. This parameter cannot be used with -SchemaHeader.
+
+.PARAMETER SchemaHeader
+    The header of the column that contains the database schema name. This parameter cannot be used with -SchemaName.
+
+.PARAMETER DbName
+    The name of the database. This database name will be applied to the entire file. This parameter cannot be used with -DbHeader.
+
+.PARAMETER DbHeader
+    The header of the column that contains the database name. This parameter cannot be used with -DbName.
+
+.PARAMETER TableName
+    The name of the table. This table name will be applied to the entire file. This parameter cannot be used with -TableHeader.
+
+.PARAMETER TableHeader
+    The header for the table.
+
+.PARAMETER ColumnHeader
+    The header for the column.
+
+.PARAMETER DataTypeHeader
+    The header for the data type.
+
+.PARAMETER DescriptionHeader
+    Optional description for the table or column.
+
+.PARAMETER GlossaryName
+    The name of the glossary to lookup the glossary term. If this is used, -GlossaryHeader must also be specified.
+
+.PARAMETER  GlossaryHeader
+    The header of the column that contains the glossary terms to apply. If this is used, -GlossaryName must also be specified.
+
+.PARAMETER ClassificationHeader
+    The header for classification information.
+
+.EXAMPLE
+    .\Manage-PurviewMetadata.ps1 -Path "C:\MyResource" -ResourceGroupName "MyRG" -PurviewAccountName "MyPurview" -DbServerName "MyServer" -DbInstanceName "SQL2019" -DbName "MyDatabase" -TableHeader "MyTable" -ColumnHeader "MyColumn" -DataTypeHeader "nvarchar(50)" -DescriptionHeader "This table contains customer data."
+
+.NOTES
+    - Ensure you have the necessary Azure credentials.
+    - Run this script with the required parameters to manage metadata in Azure Purview.
+    - Handle any errors that may occur during execution.
+
+#>
+
+
+#Requires -Modules Az.Accounts, Az.Purview
+
 param(
 
     [Parameter(Mandatory = $true)]
@@ -33,14 +110,17 @@ param(
     [Parameter()]
     [string] $DbHeader,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter()]
+    [string] $TableName,
+
+    [Parameter()]
     [string] $TableHeader = 'Table',
 
     [Parameter(Mandatory = $true)]
     [string] $ColumnHeader = 'Column',
 
     [Parameter(Mandatory = $true)]
-    [string] $TypeHeader = 'Type',
+    [string] $DataTypeHeader = 'DataType',
 
     [Parameter()]
     [string] $DescriptionHeader,
@@ -52,10 +132,7 @@ param(
     [string] $GlossaryHeader,
 
     [Parameter()]
-    [string] $ClassificationHeader,
-
-    [Parameter()]
-    [string] $QualifiedHeader
+    [string] $ClassificationHeader
 )
 
 
@@ -352,6 +429,11 @@ if ($SchemaName) {
     $columns += @{Name=$SchemaHeader; Expression={$SchemaName}}
 }
 
+if ($TableName) {
+    $TableHeader = 'Defalt-TableName'
+    $columns += @{Name=$TableHeader; Expression={$TableName}}
+}
+
 if ($DbName) {
     $DbHeader = 'Defalt-DbName'
     $columns += @{Name=$DbHeader; Expression={$DbName}}
@@ -421,11 +503,7 @@ foreach ($group in $dbGroups) {
             $global:guid--
             $columnGuid = $global:guid.ToString()
 
-            if ($QualifiedHeader) {
-                $qualifiedName = $column.$QualifiedHeader
-            } else {
-                $qualifiedName = "mssql://$server/$instance/$db/$schema/$tableName/$($column.$ColumnHeader)"
-            }
+            $qualifiedName = "mssql://$server/$instance/$db/$schema/$tableName/$($column.$ColumnHeader)"
 
             if ($DescriptionHeader) {
                 $description = $column.$DescriptionHeader
@@ -462,7 +540,7 @@ foreach ($group in $dbGroups) {
                 attributes = [PSCustomObject] @{
                     name = $column.$ColumnHeader
                     qualifiedName = $qualifiedName
-                    data_type = $column.$TypeHeader
+                    data_type = $column.$DataTypeHeader
                     description = $description
                 }
                 relationshipAttributes = [PSCustomObject] @{
@@ -499,5 +577,4 @@ foreach ($group in $dbGroups) {
         }
 
     }
-
 }
