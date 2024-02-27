@@ -69,9 +69,7 @@
     - Ensure you have the necessary Azure credentials.
     - Run this script with the required parameters to manage metadata in Azure Purview.
     - Handle any errors that may occur during execution.
-
 #>
-
 
 #Requires -Modules Az.Accounts, Az.Purview
 
@@ -466,14 +464,16 @@ foreach ($group in $dbGroups) {
         return
     }
 
+    $tablesComplete = 0
     $tables = $group.Group | Group-Object -Property @($TableHeader)
     foreach ($table in $tables) {
         $tableName = $table.Name
-        Write-Host "$tableName...working" -NoNewline
         if ($tableName.IndexOf(',') -ne -1) {
             Write-Error "$tableName invalid. Please fix and try again."
             continue
         }
+
+        Write-Progress -Activity "Loading $server/$instance/$schema/$db" -Status "Working on $tableName" -PercentComplete ($tablesComplete / $tables.Count * 100)
 
         # initialize entities
         $entities = @()
@@ -575,6 +575,8 @@ foreach ($group in $dbGroups) {
             $exception = $_.Exception
             Write-Host "`r$tableName...creation failed:" $exception.Response.StatusCode.value__ "-" $exception.Response.ReasonPhrase
         }
+
+        $tablesComplete++
 
     }
 }
