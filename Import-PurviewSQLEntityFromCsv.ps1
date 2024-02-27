@@ -200,11 +200,9 @@ function CreateSchema {
         }
         return $schemaGuid
     } catch {
-        $exception = $_.Exception
-        Write-Host "exception: " $exception
-        $response = $exception.Response
-        Write-Host "$objectName...creation failed. Error: $($response.StatusCode.Value__)-$($response.ReasonPhrase)"
-        $body
+        $exception = $_.Exception.Response
+        Write-Host "$objectName...creation failed. Error: $($exception.StatusCode.Value__)-$($exception.ReasonPhrase)"
+        Write-Error $_.ErrorDetails.Message
     }
 
     return $null
@@ -222,6 +220,7 @@ function GetGlossary {
     } catch {
         $exception = $_.Exception.Response
         Write-Host "Glossary retrieval failed: " $exception.StatusCode.value__ "-" $exception.ReasonPhrase
+        Write-Error $_.ErrorDetails.Message
         return $null
     }
 
@@ -566,14 +565,14 @@ foreach ($group in $dbGroups) {
         try {
             $response = Invoke-RestMethod -Method 'POST' -Uri $url -Body $body -Headers $global:headers
             if ($response | Get-Member -Name "mutatedEntities" -MemberType Properties) {
-                Write-Host "`r$tableName...updated successfully"
+                Write-Host "$tableName...updated successfully"
             } else {
-                Write-Host "`r$tableName...no changes needed"
+                Write-Host "$tableName...no changes needed"
             }
         } catch {
-            Write-Host $_.Exception
             $exception = $_.Exception
-            Write-Host "`r$tableName...creation failed:" $exception.Response.StatusCode.value__ "-" $exception.Response.ReasonPhrase
+            Write-Host "$tableName...creation failed:" $exception.Response.StatusCode.value__ "-" $exception.Response.ReasonPhrase
+            Write-Error $_.ErrorDetails.Message
         }
 
         $tablesComplete++
