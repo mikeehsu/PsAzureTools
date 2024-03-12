@@ -27,10 +27,10 @@ Name of the Container to write the CSV data to.
 [CmdletBinding()]
 param (
     [Parameter()]
-    [string] $StartDate,
+    [datetime] $StartDate,
 
     [Parameter()]
-    [string] $EndDate,
+    [datetime] $EndDate,
 
     [Parameter()]
     [string] $ResourceGroupName,
@@ -41,6 +41,8 @@ param (
     [Parameter()]
     [string] $ContainerName
 )
+
+Set-StrictMode -Version 2
 
 # get default dates, if not provided
 if (-not $StartDate) {
