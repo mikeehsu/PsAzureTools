@@ -154,7 +154,7 @@ while ($workDate -le $EndDate) {
             $usage = Get-AzConsumptionUsageDetail -StartDate $workDate -EndDate $workEndTime -IncludeMeterDetails -Expand 'AdditionalProperties' -ErrorAction Stop `
             | Select-Object -ExpandProperty MeterDetails -ExcludeProperty Name,MeterDetails, Tags `
             -Property *, `
-            @{Name='Tags'; Expression = { $_.Tags ? (ConvertTo-Json $_.Tags) : '' } }, `
+            @{Name='Tags'; Expression = { $_.Tags ? (ConvertTo-Json $_.Tags -Compress) : '' } }, `
             @{Name='ResourceGroupName'; Expression = { $_.InstanceId.Split('/')[4] } }
             | ConvertTo-Csv -NoTypeInformation -NoHeader:$addingToFile
             | Out-File -FilePath $path -Append:$addingToFile
