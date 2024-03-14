@@ -115,16 +115,19 @@ $validSubscriptions = Get-AzSubscription
 if ($AllSubscriptions) {
     $subscriptions = $validSubscriptions
 
-} elseif (-not $Subscription) {
-    $subscriptions = $validSubscriptions | Where-Object {$_.SubscriptionId -eq $savedContext.Subscription}
+}
+elseif (-not $Subscription) {
+    $subscriptions = $validSubscriptions | Where-Object { $_.SubscriptionId -eq $savedContext.Subscription }
 
-} else {
+}
+else {
     $subscriptions = @()
     foreach ($testSubscription in $Subscription) {
         if ([System.Guid]::TryParse($testSubscription, [System.Management.Automation.PSReference] [System.Guid]::empty)) {
-            $found = $validSubscriptions | Where-Object {$_.Id -eq $testSubscription}
-        } else {
-            $found = $validSubscriptions | Where-Object {$_.Name -eq $testSubscription}
+            $found = $validSubscriptions | Where-Object { $_.Id -eq $testSubscription }
+        }
+        else {
+            $found = $validSubscriptions | Where-Object { $_.Name -eq $testSubscription }
         }
 
         if (-not $found) {
@@ -143,7 +146,7 @@ while ($workDate -le $EndDate) {
     try {
         $filename = "UsageDetails-$($workDate.ToString('yyyy-MM-dd')).csv"
         $path = Join-Path -Path "$([System.IO.Path]::GetTempPath())" -ChildPath $filename
-        $addingToFile = $false
+        $addingToFile = 0
 
         foreach ($currentSubscription in $subscriptions) {
             $results = $currentSubscription | Set-AzContext
@@ -151,15 +154,18 @@ while ($workDate -le $EndDate) {
             Write-Progress -Activity "Working on $filename" -Status "Getting usage for $($currentSubscription.Name)"
             $workEndTime = $workDate.AddHours(23).AddMinutes(59).AddSeconds(59)
 
-            $usage = Get-AzConsumptionUsageDetail -StartDate $workDate -EndDate $workEndTime -IncludeMeterDetails -Expand 'AdditionalProperties' -ErrorAction Stop `
-            | Select-Object -ExpandProperty MeterDetails -ExcludeProperty Name,MeterDetails, Tags `
+            # export consumption details to file
+            # using second select-object -skip to support lack of -NoHeader in Azure Functions
+            Get-AzConsumptionUsageDetail -StartDate $workDate -EndDate $workEndTime -IncludeMeterDetails -Expand 'AdditionalProperties' -ErrorAction Stop `
+            | Select-Object -ExpandProperty MeterDetails -ExcludeProperty Name, MeterDetails, Tags `
             -Property *, `
-            @{Name='Tags'; Expression = { $_.Tags ? (ConvertTo-Json $_.Tags -Compress) : '' } }, `
-            @{Name='ResourceGroupName'; Expression = { $_.InstanceId.Split('/')[4] } }
-            | ConvertTo-Csv -NoTypeInformation -NoHeader:$addingToFile
+            @{Name = 'Tags'; Expression = { $_.Tags ? (ConvertTo-Json $_.Tags -Compress) : '' } }, `
+            @{Name = 'ResourceGroupName'; Expression = { $_.InstanceId.Split('/')[4] } } `
+            | ConvertTo-Csv -NoTypeInformation `
+            | Select-Object -Skip $addingToFile `
             | Out-File -FilePath $path -Append:$addingToFile
 
-            $addingToFile = $true
+            $addingToFile = 1
         }
         # upload to storage container
         Write-Progress -Activity "Working on $filename" -Status "Uploading blob to $StorageAccountName/$ContainerName"
@@ -172,7 +178,8 @@ while ($workDate -le $EndDate) {
         Write-Error "Unable to get data for $($currentSubscription.Name)"
         throw $_
 
-    } finally {
+    }
+    finally {
         $result = $savedContext | Set-AzContext
     }
 
