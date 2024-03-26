@@ -23,61 +23,105 @@
   </section>
 
   <!-- file selection area -->
-  <div class="columns is-centered">
-    <div class="file is-info is-boxed">
-      <label class="file-label">
-        <input class="file-input" type="file" name="image" id="image">
-        <span class="file-cta">
-          <span class="file-icon">
-            <em class="fas fa-upload"></em>
-          </span>
-          <span class="file-label">
-            Choose a file...
-          </span>
-        </span>
-      </label>
-    </div>
+  <div id="dropzone">
+    <center>Drop files here or click to browse</center>
   </div>
 
   <!-- message area -->
   <br>
   <div class="columns is-centered">
-    <div class="notification is-info is-light ">
-      <strong><label class="has-text-centered" id="message"></label></strong>
+    <div class="notification is-info is-light preformatted-text">
+      <strong><label class="text-align" id="message"></label></strong>
     </div>
   </div>
 
   <!-- scripts -->
   <script src="main.js" type="text/javascript"></script>
   <script>
-    (async function () {
-      // const response = await fetch("/api/credentials");
-      // const {url, sasKey} = await response.json();
-      const regexp = /.z\d+.web./i;
-      var containerName = "documents";
+    const dropzone = document.getElementById('dropzone');
+    const regexp = /.z\d+.web./i;
+    var containerName = "documents";
 
-      var url = location.protocol.concat("//").concat(window.location.host).replace(regexp, '.blob.');
-      var urlParams = new URLSearchParams(window.location.search);
-      var sasKey = urlParams.toString();
-      if (urlParams.has('container')) {
-        containerName = urlParams.get('container');
+    var url = location.protocol.concat("//").concat(window.location.host).replace(regexp, '.blob.');
+    var urlParams = new URLSearchParams(window.location.search);
+    var sasKey = urlParams.toString();
+    if (urlParams.has('container')) {
+      containerName = urlParams.get('container');
+    }
+
+    document.querySelector('#url').textContent = `URL: ${url}`;
+    document.querySelector('#sasKey').value = `${sasKey}`;
+
+
+    // Handle drag/drop events
+    dropzone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      dropzone.classList.add('drag-over');
+    });
+
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('drag-over');
+    });
+
+    dropzone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      dropzone.classList.remove('drag-over');
+
+      const files = event.dataTransfer.files;
+
+      // Loop through dropped files and upload them
+      for (const file of files) {
+        uploadFile(file);
       }
+    });
 
-      document.querySelector('#url').textContent = `URL: ${url}`;
-      document.querySelector('#sasKey').value = `${sasKey}`;
+    // Handle click event for browsing files
+    dropzone.addEventListener('click', () => {
+      document.getElementById('fileInput').click();
+    });
 
-      // upload the file
-      function uploadFile() {
-        const file = document.getElementById('image').files[0];
-        blobUpload(file, url, containerName, document.querySelector('#sasKey').value);
-      };
+    // Hidden file input element
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.id = 'fileInput';
+    fileInput.multiple = true;
+    fileInput.style.display = 'none';
+    document.body.appendChild(fileInput);
 
-      // link upload action to file selection
-      const fileInput = document.getElementById('image');
-      fileInput.addEventListener("change", uploadFile);
-    }())
+    fileInput.addEventListener('change', (event) => {
+      const files = event.target.files;
+      for (const file of files) {
+        uploadFile(file);
+      }
+    });
+
+    // upload the file
+    function uploadFile(file) {
+      console.log(`Uploading: ${file.name}`);
+      blobUpload(file, url, containerName, document.querySelector('#sasKey').value);
+    };
+
   </script>
 
+  <style>
+    #dropzone {
+      width: 400px;
+      height: 200px;
+      border: 2px dashed #ccc;
+      text-align: center;
+      line-height: 200px;
+      cursor: pointer;
+      margin: 20px auto;
+    }
+
+    #dropzone.drag-over {
+      border-color: #333;
+    }
+
+    .preformatted-text {
+      white-space: pre-line;
+    }
+  </style>
 </body>
 
 </html>
