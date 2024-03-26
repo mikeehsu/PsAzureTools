@@ -651,7 +651,12 @@ if ($PSCmdlet.ParameterSetName -eq 'StorageAccount') {
         throw "Error getting container info for $ContainerName - "
     }
 
-    $ContainerURI = $storageAccount.PrimaryEndpoints.Blob + $ContainerName + $(New-AzStorageAccountSASToken -Context $storageAccount.context -Service Blob -ResourceType Service, Container, Object -Permission racwdlup -ExpiryTime $(Get-Date).AddDays(5))
+    $sasToken = New-AzStorageAccountSASToken -Context $storageAccount.context -Service Blob -ResourceType Service, Container, Object -Permission racwdlup -ExpiryTime $(Get-Date).AddDays(5)
+    if (-not $sasToken.StartsWith('?')) {
+        # necessary for breaking change introduced with Az.Storage v6.0+
+        $sasToken = '?' + $sasToken
+    }
+    $ContainerURI = $storageAccount.PrimaryEndpoints.Blob + $ContainerName + $sasToken
 }
 
 # check -CleanUpDir parameter
