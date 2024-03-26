@@ -7,8 +7,9 @@
     "test": "echo \"No tests yet...\"",
     "build": "webpack --mode=production"
   },
-  "dependencies": {},
   "devDependencies": {
-    "@azure/storage-blob": "^12.9.0"
+    "@azure/storage-blob": "^12.9.0",
+    "webpack": "^5.91.0",
+    "webpack-cli": "^5.1.4"
   }
 }
