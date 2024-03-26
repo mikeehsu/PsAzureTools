@@ -48,6 +48,9 @@ param (
     [string] $ContainerName,
 
     [Parameter()]
+    [string] $StorageSubscription,
+
+    [Parameter()]
     [string[]] $Subscription,
 
     [Parameter()]
@@ -67,6 +70,10 @@ if (-not $EndDate) {
 }
 
 # read defaults from environment variables, if not provided
+if (-not $StorageSubscription) {
+    $StorageSubscription = $env:StorageSubscription
+}
+
 if (-not $ResourceGroupName) {
     $ResourceGroupName = $env:ResourceGroupName
 }
@@ -97,11 +104,8 @@ catch {
     return
 }
 
-$storageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName
-if (-not $storageAccount) {
-    Write-Error "StorageAccount ($StorageAccountName) not found."
-    return
-}
+# save current context (used to restore on exit)
+$savedContext = Get-AzContext
 
 # validate subscriptions
 if ($AllSubscriptions -and $Subscription) {
@@ -109,9 +113,7 @@ if ($AllSubscriptions -and $Subscription) {
     return
 }
 
-$savedContext = Get-AzContext
 $validSubscriptions = Get-AzSubscription
-
 if ($AllSubscriptions) {
     $subscriptions = $validSubscriptions
 
@@ -137,55 +139,102 @@ else {
         $subscriptions += $found
     }
 }
+$subscriptions = $subscriptions | Sort-Object -Property Name
+
+
+# verify storage account
+if ($StorageSubscription) {
+    Set-AzContext $StorageSubscription
+}
+
+$storageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName
+if (-not $storageAccount) {
+    Write-Error "StorageAccount ($StorageAccountName) not found."
+    return
+}
+
+# get list of blobs created today
+$prefix = "UsageDetails-"
+$suffix = ".csv"
+
+$container = $storageAccount | Get-AzStorageContainer -Name $ContainerName
+$blobs = $container | Get-AzStorageBlob | Where-Object { $_.blobProperties.LastModified -ge (Get-Date).Date }
+$blobNames = $blobs.Name
+
 
 # work through each day at a time
 $fileCount = 0
 $workDate = Get-Date -Date $StartDate.ToString('yyyy-MM-dd')
 
 while ($workDate -le $EndDate) {
-    try {
-        $filename = "UsageDetails-$($workDate.ToString('yyyy-MM-dd')).csv"
-        $path = Join-Path -Path "$([System.IO.Path]::GetTempPath())" -ChildPath $filename
-        $addingToFile = 0
+    $filename = $prefix + $($workDate.ToString('yyyy-MM-dd')) + $suffix
+    $path = Join-Path -Path "$([System.IO.Path]::GetTempPath())" -ChildPath $filename
+    $workEndTime = $workDate.AddHours(23).AddMinutes(59).AddSeconds(59)
+    $addingToFile = 0
 
-        foreach ($currentSubscription in $subscriptions) {
-            $results = $currentSubscription | Set-AzContext
-
-            Write-Progress -Activity "Working on $filename" -Status "Getting usage for $($currentSubscription.Name)"
-            $workEndTime = $workDate.AddHours(23).AddMinutes(59).AddSeconds(59)
-
-            # export consumption details to file
-            # using second select-object -skip to support lack of -NoHeader in Azure Functions
-            Get-AzConsumptionUsageDetail -StartDate $workDate -EndDate $workEndTime -IncludeMeterDetails -Expand 'AdditionalProperties' -ErrorAction Stop `
-            | Select-Object -ExpandProperty MeterDetails -ExcludeProperty Name, MeterDetails, Tags `
-            -Property *, `
-            @{Name = 'Tags'; Expression = { $_.Tags ? (ConvertTo-Json $_.Tags -Compress) : '' } }, `
-            @{Name = 'ResourceGroupName'; Expression = { $_.InstanceId.Split('/')[4] } } `
-            | ConvertTo-Csv -NoTypeInformation `
-            | Select-Object -Skip $addingToFile `
-            | Out-File -FilePath $path -Append:$addingToFile
-
-            $addingToFile = 1
-        }
-        # upload to storage container
-        Write-Progress -Activity "Working on $filename" -Status "Uploading blob to $StorageAccountName/$ContainerName"
-        $results = Set-AzStorageBlobContent -File $path -Container $ContainerName -Blob $filename -Context $storageAccount.Context -Force
-        Write-Host "$filename uploaded to $StorageAccountName/$ContainerName"
-
-        $fileCount++
+    # due to severe rate limiting and amoutn of time required to execute the
+    # extract, some subscriptions and/or dates may not complete before time
+    # limits, like those imposed by Azure Functions expire.
+    #
+    # to make for a graceful restart, the script will skip over any files
+    # exported after midnight today and only export old or missing files
+    if ($blobNames -contains $filename) {
+        Write-Host "$filename was updated today, skipping"
+        $workDate = $workDate.AddDays(1)
+        continue
     }
-    catch {
-        Write-Error "Unable to get data for $($currentSubscription.Name)"
-        throw $_
 
+    foreach ($currentSubscription in $subscriptions) {
+        $results = $currentSubscription | Set-AzContext
+
+        # export consumption details to file
+        # using second select-object -skip to support lack of -NoHeader in Azure Functions
+        $success = $false
+        do {
+            try {
+                Write-Progress -Activity "Working on $filename" -Status "Getting usage for $($currentSubscription.Name)"
+
+                Get-AzConsumptionUsageDetail -StartDate $workDate -EndDate $workEndTime -IncludeMeterDetails -Expand 'AdditionalProperties' -ErrorAction Stop `
+                | Select-Object -ExpandProperty MeterDetails -ExcludeProperty Name, MeterDetails, Tags `
+                    -Property *, `
+                @{Name = 'Tags'; Expression = { $_.Tags ? (ConvertTo-Json $_.Tags -Compress) : '' } }, `
+                @{Name = 'ResourceGroupName'; Expression = { $_.InstanceId.Split('/')[4] } } `
+                | ConvertTo-Csv -NoTypeInformation `
+                | Select-Object -Skip $addingToFile `
+                | Out-File -FilePath $path -Append:$addingToFile
+
+                $success = $true
+            }
+            catch {
+                if ($_.Exception.Message -like '*too many attempts*') {
+                    Write-Error $_.Exception
+                    Write-Host "Retrying in 5 seconds..."
+                    # throttle retries
+                    Start-Sleep 5
+                }
+                else {
+                    Write-Error "Unable to get data for $($currentSubscription.Name)"
+                    throw $_
+                }
+                finally {
+                    $result = $savedContext | Set-AzContext
+                }
+            }
+        } while (-not $success)
+
+        $addingToFile = 1
     }
-    finally {
-        $result = $savedContext | Set-AzContext
-    }
+
+    # upload to storage container
+    Write-Progress -Activity "Working on $filename" -Status "Uploading blob to $StorageAccountName/$ContainerName"
+    $results = Set-AzStorageBlobContent -File $path -Container $ContainerName -Blob $filename -Context $storageAccount.Context -Force
+    Write-Host "$filename uploaded to $StorageAccountName/$ContainerName"
+    $fileCount++
 
     # clean up
     Remove-Item -Path $path
 
+    # move to next day
     $workDate = $workDate.AddDays(1)
 }
 
