@@ -33,7 +33,7 @@ param (
 try {
     $context = Get-AzContext -ErrorAction Stop
     if (-not $context.Environment) {
-        throw"Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
+        throw 'Please login (Connect-AzAccount) and set the proper subscription context before proceeding.'
     }
 
 }
@@ -46,7 +46,7 @@ catch {
 $storageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName -ErrorAction SilentlyContinue
 if (-not $storageAccount) {
     if (-not $Location) {
-        throw "-Location is required to create a storage account."
+        Write-Error "Storage Account ($storageAccountName) not found. Please provide an existing storage account or provide -Location."
         return
     }
 
