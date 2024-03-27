@@ -41,6 +41,7 @@
     const dropzone = document.getElementById('dropzone');
     const regexp = /.z\d+.web./i;
     var containerName = "documents";
+    var folder = Date.now().toString() + '-' + Math.random().toString(16).slice(2);
 
     var url = location.protocol.concat("//").concat(window.location.host).replace(regexp, '.blob.');
     var urlParams = new URLSearchParams(window.location.search);
@@ -98,7 +99,7 @@
     // upload the file
     function uploadFile(file) {
       console.log(`Uploading: ${file.name}`);
-      blobUpload(file, url, containerName, document.querySelector('#sasKey').value);
+      blobUpload(folder, file, url, containerName, document.querySelector('#sasKey').value);
     };
 
   </script>
