@@ -94,7 +94,7 @@ try {
         $docsContainer = New-AzStorageContainer -Context $storageAccount.Context -Name 'documents'
     }
 
-    $sasToken = $docsContainer | New-AzStorageContainerSASToken -Permission c
+    $sasToken = $docsContainer | New-AzStorageContainerSASToken -Permission cw -ExpiryTime (Get-Date).AddYears(1)
 
     $storageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName
     Write-Host "$StorageAccountName configuration complete. To upload, use this URL: $($storageAccount.PrimaryEndpoints.Web)$sasToken"
