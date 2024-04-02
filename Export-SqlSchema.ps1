@@ -88,10 +88,13 @@ param (
     [Parameter()]
     [switch] $SeparateFiles
 )
+$ErrorActionPreference = 'Stop'
 
 #Require SqlServer
+if (-not (Get-Module -Name SqlServer)) {
+    Import-Module -Name SqlServer
+}
 
-$ErrorActionPreference = 'Stop'
 
 # if missing get password
 if (-not $Password) {
@@ -104,12 +107,15 @@ if (-not (Test-Path $Path)) {
     New-Item -Path $Path -ItemType Directory -ErrorAction Stop
 }
 
+$fileExists = $false
 if (((Test-Path "$Path/Table") -and (Get-Item "$Path/Table")) -or
     ((Test-Path "$Path/View") -and (Get-Item "$Path/View")) -or
     ((Test-Path "$Path/StoredProcedure") -and (Get-Item "$Path/StoredProcedure")) -or
     ((Test-Path "$Path/UserDefinedFunction") -and (Get-Item "$Path/UserDefinedFunction"))) {
     $fileExists = $true
 }
+$Path = (Get-Item $Path).FullName
+Write-Host "Outputting shema to: $Path"
 
 if ($fileExists) {
     if ($Overwrite) {
@@ -146,7 +152,7 @@ if ($All) {
 
 try {
     # initialize sql server connection
-    [System.Reflection.Assembly]::LoadWithPartialName('Microsoft.SqlServer.SMO')
+    $smo = [System.Reflection.Assembly]::LoadWithPartialName('Microsoft.SqlServer.SMO')
 
     # Create the SMO Server object
     $server = New-Object Microsoft.SqlServer.Management.Smo.Server($DBServerName)
@@ -158,12 +164,11 @@ try {
 
     $db = $server.databases[$DBName]
     if (-not $db) {
-        throw "Error connecting to $DBServerName/$DBName. Please check server/database name & credentials."
+        throw "Error connecting to $DBServerName/$DBName. Please check server/database name, credentials and network."
     }
 
 }
 catch {
-    Write-Error "Error connecting to $DBServerName/$DBName."
     throw $_
 }
 
