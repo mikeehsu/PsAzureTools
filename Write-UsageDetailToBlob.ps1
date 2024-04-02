@@ -159,8 +159,11 @@ $suffix = ".csv"
 
 $container = $storageAccount | Get-AzStorageContainer -Name $ContainerName
 $blobs = $container | Get-AzStorageBlob | Where-Object { $_.blobProperties.LastModified -ge (Get-Date).Date }
-$blobNames = $blobs.Name
-
+if ($blobs) {
+    $blobNames = $blobs.Name
+} else {
+    $blobNames = @()
+}
 
 # work through each day at a time
 $fileCount = 0
