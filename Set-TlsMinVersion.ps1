@@ -70,8 +70,10 @@ function Update-WebApp {
     $webApps = Get-AzWebApp
     Write-Host "$($webApps.Count) web apps"
 
+    # when getting all webapps without -ResourceGroupName and -Name parameters
+    # the MinTlsVersion setting is not populated. We need to step through each
+    # webapp one at a time to get the MinTlsVersion setting
     $webAppDetails = @()
-
     foreach ($webapp in $webApps) {
         $webAppDetail = Get-AzWebApp -ResourceGroupName $webapp.ResourceGroup -Name $webapp.Name
         $webAppDetails += [PSCustomObject] @{
