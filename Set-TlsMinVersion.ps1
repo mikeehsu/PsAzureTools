@@ -2,7 +2,7 @@
 
 param (
     [Parameter()]
-    [switch] $ApplyTLS12
+    [switch] $ApplyTls12
 )
 
 Set-StrictMode -Version 2
@@ -27,15 +27,17 @@ function Update-StorageAccounts {
         Write-Host "$($tlsGroup.Name) - $($tlsGroup.Count) storage accounts"
     }
 
-    # Apply TLS 1.2
-    if (-not $ApplyTLS12) {
-        return
-    }
-
     # select all accounts without TLS 1.2
     $tls12Group = $tlsGroups | Where-Object { $_.Name -ne 'TLS1_2' }
     if (-not $tls12Group) {
         Write-Host "No storage accounts updates needed."
+        return
+    }
+
+    Write-Host "$($tls12Group.Count) storage accounts need updating to TLS 1.2"
+
+    # Apply TLS 1.2
+    if (-not $ApplyTLS12) {
         return
     }
 
@@ -88,15 +90,17 @@ function Update-WebApp {
         Write-Host "$($name) - $($tlsGroup.Count) web apps"
     }
 
-    # Apply TLS 1.2
-    if (-not $ApplyTLS12) {
-        return
-    }
-
     # select all accounts without TLS 1.2
     $tls12Group = $tlsGroups | Where-Object { $_.Name -ne '1.2' }
     if (-not $tls12Group) {
         Write-Host "No webapp updates needed."
+        return
+    }
+
+    Write-Host "$($tls12Group.Count) web apps need updating to TLS 1.2"
+
+    # Apply TLS 1.2
+    if (-not $ApplyTLS12) {
         return
     }
 
