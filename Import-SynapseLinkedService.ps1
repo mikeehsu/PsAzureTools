@@ -30,7 +30,7 @@ param (
     [string] $WorkspaceName,
 
     [Parameter()]
-    [string] $LinkedServiceName,
+    [string[]] $LinkedServiceName,
 
     [Parameter(Mandatory)]
     [string] $Path,
@@ -172,7 +172,7 @@ $linkedServices = Get-Content $Path | ConvertFrom-Json
 
 # only one LinkedService to copy, if specified
 if ($LinkedServiceName) {
-    $linkedServices = $linkedServices | Where-Object { $_.name -eq $LinkedServiceName }
+    $linkedServices = $linkedServices | Where-Object { $LinkedServiceName -contains $_.name }
     if (-not $linkedServices) {
         Write-Error "Unable to find LinkedService '$LinkedServiceName' in $SourceResourceGroupName/$SourceWorkspaceName"
         return
