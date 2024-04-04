@@ -8,7 +8,7 @@ The script uses the Microsoft.SqlServer.SMO library to connect to a SQL Server d
 This script requires the Microsoft.SqlServer.SqlManagementObjects package and SqlServer modules. To install these modules, run the following command:
 
 - Register-PackageSource -Name "NuGet" -Location "https://api.nuget.org/v3/index.json" -ProviderName NuGet
-- Install-Package Microsoft.SqlServer.SqlManagementObjects
+- Install-Package Microsoft.SqlServer.SqlManagementObjects -SkipDependencyCheck
 - Install-Module SqlServer
 
 .PARAMETER Path
