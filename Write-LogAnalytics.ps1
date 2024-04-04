@@ -31,7 +31,7 @@ param(
     [parameter(Mandatory)]
     [string] $ResourceGroupName,
 
-    [Alias("Name")]
+    [Alias('Name')]
     [parameter(Mandatory)]
     [string] $WorkspaceName,
 
@@ -46,8 +46,7 @@ param(
 )
 
 # Create the function to create the authorization signature
-Function BuildSignature
-{
+Function BuildSignature {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
@@ -72,7 +71,7 @@ Function BuildSignature
         [string] $Resource
     )
 
-    $xHeaders = "x-ms-date:" + $Date
+    $xHeaders = 'x-ms-date:' + $Date
     $stringToHash = $Method + "`n" + $ContentLength + "`n" + $ContentType + "`n" + $xHeaders + "`n" + $Resource
 
     $bytesToHash = [Text.Encoding]::UTF8.GetBytes($stringToHash)
@@ -88,8 +87,7 @@ Function BuildSignature
 }
 
 # Create the function to create and post the request
-function PostLogAnalyticsData()
-{
+function PostLogAnalyticsData() {
 
     [CmdletBinding()]
     param (
@@ -104,11 +102,9 @@ function PostLogAnalyticsData()
 
         [Parameter(Mandatory)]
         [string] $LogEntry
-)
+    )
     $body = ([System.Text.Encoding]::UTF8.GetBytes($LogEntry))
 
-    $method = 'POST'
-    $contentType = 'application/json'
     $rfc1123date = [DateTime]::UtcNow.ToString('r')
     $contentLength = $body.Length
 
@@ -117,34 +113,36 @@ function PostLogAnalyticsData()
         -SharedKey $SharedKey `
         -Date $rfc1123date `
         -ContentLength $contentLength `
+        -Method 'POST' `
+        -ContentType 'application/json' `
+        -Resource '/api/logs'
 
-    $headers = @{
-        "Authorization" = $signature;
-        "Log-Type" = $logType;
-        "x-ms-date" = $rfc1123date;
-        "time-generated-field" = $TimeStampField;
-    }
-
-        $context = Get-AzContext
+    $context = Get-AzContext
     switch ($context.Environment) {
         'AzureChina' {
-            $endpointSuffix = 'ods.opinsights.azure.cn'
+            $endpointSuffix = '.ods.opinsights.azure.cn'
             break
         }
         'AzureCloud' {
-            $endpointSuffix = 'ods.opinsights.azure.com'
+            $endpointSuffix = '.ods.opinsights.azure.com'
             break
         }
         'AzureUSGovernment' {
-            $endpointSuffix = 'ods.opinsights.azure.us'
+            $endpointSuffix = '.ods.opinsights.azure.us'
             break
         }
     }
 
-    $uri = "https://" + $CustomerId + $endpointSuffix + '/api/logs' + "?api-version=2016-04-01"
+    $uri = 'https://' + $CustomerId + $endpointSuffix + '/api/logs' + '?api-version=2016-04-01'
 
+    $headers = @{
+        'Authorization'        = $signature;
+        'Log-Type'             = $logType;
+        'x-ms-date'            = $rfc1123date;
+        'time-generated-field' = $TimeStampField;
+    }
 
-    $response = Invoke-WebRequest -Uri $uri -Method $method -ContentType $contentType -Headers $headers -Body $body -UseBasicParsing
+    $response = Invoke-WebRequest -Method 'POST' -Uri $uri -ContentType 'application/json' -Headers $headers -Body $body -UseBasicParsing
     return $response.StatusCode
 }
 
@@ -160,6 +158,11 @@ try {
 }
 catch {
     throw 'Please login (Connect-AzAccount) and set the proper subscription context before proceeding.'
+    return
+}
+
+if (-not (Test-Json -Json $LogEntry -ErrorAction SilentlyContinue)) {
+    Write-Error '-LogEntry value is not valid JSON. Please correct and try again.' -ErrorAction Stop
     return
 }
 
