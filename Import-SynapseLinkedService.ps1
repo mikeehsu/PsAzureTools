@@ -11,7 +11,7 @@
 .PARAMETER WorkspaceName
     The name of the destination Azure Synapse workspace. This is mandatory.
 
-.PARAMETER $LinkedServiceName
+.PARAMETER $name
     The name of the LinkedService(s) to import from the provided file. If this is not supplied, all LinkedServices from the file will be imported.
 
 .PARAMETER Suffix
@@ -79,27 +79,27 @@ function New-SynapseLinkedService {
         [PSCustomObject] $Synapse,
 
         [Parameter(Mandatory)]
-        [string] $LinkedServiceName,
+        [string] $name,
 
         [Parameter(Mandatory)]
         [PSCustomObject] $Properties
     )
 
 
-    $uri = "$($Synapse.connectivityEndpoints.dev)/linkedServices/$($LinkedServiceName)?api-version=2019-06-01-preview"
+    $uri = "$($Synapse.connectivityEndpoints.dev)/linkedServices/$($name)?api-version=2019-06-01-preview"
     $payload = @{
-        name       = $LinkedServiceName
+        name       = $name
         properties = $Properties
     } | ConvertTo-Json -Depth 10
 
 
-    Write-Verbose "$LinkedServiceName...creating"
+    Write-Verbose "$name...creating"
     # Write-Host $uri
     # Write-Host $payload
 
     $results = Invoke-AzRestMethod -Uri $uri -Method PUT -Payload $payload
     if ($results.StatusCode -ne 202) {
-        Write-Error "Failed to create $($LinkedServiceName): $($results | ConvertTo-Json -Depth 10)"
+        Write-Error "Failed to create $($name): $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
 
@@ -109,30 +109,30 @@ function New-SynapseLinkedService {
 
         $location = $results.headers | Where-Object { $_.key -eq 'Location' }
         if (-not $location) {
-            Write-Error "Failed to create $($LinkedServiceName): $($results | ConvertTo-Json -Depth 10)"
+            Write-Error "Failed to create $($name): $($results | ConvertTo-Json -Depth 10)"
             return $null
         }
 
         $results = Invoke-AzRestMethod -Uri $location.value[0] -Method GET
         if ($results.StatusCode -eq 202) {
-            Write-Verbose "$($LinkedServiceName)...$($($results.Content | ConvertFrom-Json).status)"
+            Write-Verbose "$($name)...$($($results.Content | ConvertFrom-Json).status)"
         }
 
     } while ($results.StatusCode -eq 202)
 
-    Write-Verbose "$LinkedServiceName...$($results.Content)"
+    Write-Verbose "$name...$($results.Content)"
     if ($results.StatusCode -ne 200) {
-        Write-Error "Failed to create $($LinkedServiceName): $($results | ConvertTo-Json -Depth 10)"
+        Write-Error "Failed to create $($name): $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
 
     $content = $results.Content | ConvertFrom-Json
     if (-not ($content.PSobject.Properties.name -like 'id')) {
-        Write-Error "Failed to create $($LinkedServiceName): $($content.error | ConvertTo-Json -Depth 10)"
+        Write-Error "Failed to create $($name): $($content.error | ConvertTo-Json -Depth 10)"
         return $null
     }
 
-    Write-Verbose "$LinkedServiceName...created"
+    Write-Verbose "$name...created"
 
     return ($results.Content | ConvertFrom-Json)
 }
@@ -174,7 +174,7 @@ $linkedServices = Get-Content $Path | ConvertFrom-Json
 if ($LinkedServiceName) {
     $linkedServices = $linkedServices | Where-Object { $LinkedServiceName -contains $_.name }
     if (-not $linkedServices) {
-        Write-Error "Unable to find LinkedService '$LinkedServiceName' in $SourceResourceGroupName/$SourceWorkspaceName"
+        Write-Error "Unable to find LinkedService '$name' in $SourceResourceGroupName/$SourceWorkspaceName"
         return
     }
 
@@ -190,28 +190,33 @@ $skipCount = 0
 $failedCount = 0
 $failedNames = @()
 foreach ($linkedService in $linkedServices) {
-    $linkedServiceName = $linkedService.name + $Suffix
-    Write-Progress -Activity 'Creating LinkedServices' -Status $linkedServiceName -PercentComplete (($successCount + $failedCount + $skipCount) / $linkedServices.Count * 100)
+    $name = $linkedService.name + $Suffix
+    Write-Progress -Activity 'Creating LinkedServices' -Status $name -PercentComplete (($successCount + $failedCount + $skipCount) / $linkedServices.Count * 100)
 
-    # check if LinkedService already exists
-    $destinationLinkedService = $existingLinkedServices | Where-Object { $_.name -eq $linkedServiceName }
-    if ($destinationLinkedService -and -not $Overwrite) {
-        $skipCount++
-        Write-Host "$($linkedServiceName)...skipped (exists)"
-        continue
+    if (-not $Overwrite) {
+        # check if LinkedService already esxists
+        $found = $existingLinkedServices | Where-Object { $LinkedServiceName -contains $_.name }
+        if ($found) {
+            $skipCount++
+            Write-Host "$($name)...skipped (exists)"
+            continue
+        }
     }
 
     # create LinkedService
-    $newService = New-SynapseLinkedService -Synapse $synapse -LinkedServiceName $linkedServiceName -Properties $linkedService.Properties
-    if (-not $newService) {
-        $failedCount++
-        $failedNames = $failedNames + $linkedServiceName
-        Write-Host "$($linkedServiceName)...FAILED"
-        Write-Error "Failed to create LinkedService '$linkedServiceName' in Synapse workspace ($ResourceGroupName/$WorkspaceName)."
-    }
-    else {
+    try {
+        $newService = New-SynapseLinkedService -Synapse $synapse -name $name -Properties $linkedService.Properties
+        if (-not $newService) {
+            throw "Untrapped error creating LinkedService '$name' in destination data factory ($ResourceGroupName/$WorkspaceName)."
+        }
         $successCount++
-        Write-Host "$linkedServiceName...created"
+        Write-Host "$name...created"
+    }
+    catch {
+        Write-Error $_
+        $failedCount++
+        $failedNames = $failedNames + $name
+        Write-Host "$name...FAILED"
     }
 }
 

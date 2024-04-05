@@ -113,7 +113,7 @@ if ($LinkedServiceName) {
 # sort list of LinkedServices to copy
 $linkedServices `
     | Sort-Object -Property Name `
-    | ConvertTo-Json -Depth 10 `
+    | ConvertTo-Json -Depth 100 `
     | Out-File $Path
 
 Write-Host "$($linkedServices.Count) linked services exported to $Path"

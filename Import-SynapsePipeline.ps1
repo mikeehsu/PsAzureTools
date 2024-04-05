@@ -44,7 +44,35 @@ param (
     [switch] $Overwrite
 )
 
+function Get-SynapsePipeline
+{
+    param (
+        [Parameter(Mandatory)]
+        [PSCustomObject] $Synapse
+    )
 
+    $pipelines = @()
+    $uri = "$($Synapse.connectivityEndpoints.dev)/pipelines?api-version=2019-06-01-preview"
+
+    do {
+        $results = Invoke-AzRestMethod -Uri $uri -Method GET
+        if ($results.StatusCode -ne 200) {
+            Write-Error "Failed to get pipeline: $($results.Content)"
+            return $null
+        }
+
+        $content = $results.Content | ConvertFrom-Json
+        $pipelines += $content.value
+
+        if ($content.PSobject.Properties.name -like 'nextLink') {
+            $uri = $content.nextLink
+        } else {
+            $uri = $null
+        }
+    } while ($uri)
+
+    return $pipelines
+}
 
 function New-SynapsePipeline {
     param (
@@ -52,26 +80,26 @@ function New-SynapsePipeline {
         [PSCustomObject] $Synapse,
 
         [Parameter(Mandatory)]
-        [string] $PipelineName,
+        [string] $name,
 
         [Parameter(Mandatory)]
         [PSCustomObject] $Properties
     )
 
-    $uri = "$($Synapse.connectivityEndpoints.dev)/pipelines/$($PipelineName)?api-version=2019-06-01-preview"
+    $uri = "$($Synapse.connectivityEndpoints.dev)/pipelines/$($name)?api-version=2019-06-01-preview"
     $payload = @{
-        name       = $PipelineName
+        name       = $name
         properties = $Properties
     } | ConvertTo-Json -Depth 10
 
 
-    Write-Verbose "$PipelineName...creating"
+    Write-Verbose "$name...creating"
     # Write-Host $uri
     # Write-Host $payload
 
     $results = Invoke-AzRestMethod -Uri $uri -Method PUT -Payload $payload
     if ($results.StatusCode -ne 202) {
-        throw "Failed (submission) to create $($PipelineName): $($results | ConvertTo-Json -Depth 10)"
+        throw "Failed (submission) to create $($name): $($results | ConvertTo-Json -Depth 10)"
         return $null
     }
 
@@ -81,28 +109,28 @@ function New-SynapsePipeline {
 
         $location = $results.headers | Where-Object { $_.key -eq 'Location' }
         if (-not $location) {
-            Write-Error "Failed (nokey) to create ($PipelineName): $($results | ConvertTo-Json -Depth 10)"
+            Write-Error "Failed (nokey) to create ($name): $($results | ConvertTo-Json -Depth 10)"
             return $null
         }
 
         $results = Invoke-AzRestMethod -Uri $location.value[0] -Method GET
         if ($results.StatusCode -eq 202) {
-            Write-Verbose "$($PipelineName)...$($($results.Content | ConvertFrom-Json).status)"
+            Write-Verbose "$($name)...$($($results.Content | ConvertFrom-Json).status)"
         }
 
     } while ($results.StatusCode -eq 202)
 
     # Write-Verbose "$LinkedServiceName...$($results.Content)"
     if ($results.StatusCode -ne 200) {
-        throw "Failed (200) to create ($PipelineName): $($results | ConvertTo-Json -Depth 100)"
+        throw "Failed (200) to create ($name): $($results | ConvertTo-Json -Depth 100)"
     }
 
     $content = $results.Content | ConvertFrom-Json
     if (-not ($content.PSobject.Properties.name -like 'id')) {
-        throw "Failed (no id) to create ($PipelineName): $($content.error | ConvertTo-Json -Depth 100)"
+        throw "Failed (no id) to create ($name): $($content.error | ConvertTo-Json -Depth 100)"
     }
 
-    Write-Verbose "$PipelineName...created"
+    Write-Verbose "$name...created"
     return ($results.Content | ConvertFrom-Json)
 }
 
@@ -128,13 +156,12 @@ catch {
 # get destination workspace
 $synapse = Get-AzSynapseWorkspace -ResourceGroupName $ResourceGroupName -Name $WorkspaceName -ErrorAction Stop
 if (-not $synapse) {
-    Write-Error "Unable to find Destination Synapse workspace $ResourceGroupName/$WorkspaceName"
+    Write-Error "Unable to find Synapse workspace $ResourceGroupName/$WorkspaceName"
     return
 }
 
-# get list of pipelines in destination workspace
+# get list of pipelines in workspace
 $existingPipelines = Get-SynapsePipeline -Synapse $synapse -ErrorAction Stop
-
 
 # read file
 $pipelines = Get-Content $Path | ConvertFrom-Json
@@ -142,7 +169,7 @@ $pipelines = Get-Content $Path | ConvertFrom-Json
 # process only one pipeline if specified
 if ($PipelineName) {
     # filter down pipeline to just the one we want
-    $pipeline = $pipelines | Where-Object { $_.name -eq $PipelineName }
+    $pipeline = $pipelines | Where-Object { $PipelineName -contains $_.name}
     if (-not $pipeline) {
         Write-Error "Unable to find pipeline '$PipelineName' in $ResourceGroupName/$WorkspaceName"
         return
@@ -161,32 +188,32 @@ $failedCount = 0
 $failedNames = @()
 foreach ($pipeline in $pipelines) {
 
-    $pipelineName = $pipeline.Name + $Suffix
-    Write-Progress -Activity 'Copy Pipelines' -Status "$pipelineName" -PercentComplete (($successCount + $failedCount + $skipCount) / $pipelines.Count * 100)
+    $name = $pipeline.Name + $Suffix
+    Write-Progress -Activity 'Copy Pipelines' -Status "$name" -PercentComplete (($successCount + $failedCount + $skipCount) / $pipelines.Count * 100)
 
     if (-not $Overwrite) {
         # check if pipeline already exists
-        $existingPipeline = $existingPipelines | Where-Object { $_.name -eq $pipelineName }
-        if ($existingPipeline) {
+        $found = $existingPipelines | Where-Object {$PipelineName -contains $_.name }
+        if ($found) {
             $skipCount++
-            Write-Host "$($pipelineName)...skipped (exists)"
+            Write-Host "$name...skipped (exists)"
             continue
         }
     }
 
     # create pipeline
     try {
-        $newService = New-SynapsePipeline -Synapse $synapse -PipelineName $pipelineName -Properties $pipeline.Properties
+        $newService = New-SynapsePipeline -Synapse $synapse -name $name -Properties $pipeline.Properties
         if (-not $newService) {
-            throw "Untrapped error creating pipeline '$pipelineName' in destination data factory ($ResourceGroupName/$WorkspaceName)."
+            throw "Untrapped error creating pipeline '$name' in destination data factory ($ResourceGroupName/$WorkspaceName)."
         }
         $successCount++
-        Write-Host "$pipelineName...created"
+        Write-Host "$name...created"
     } catch {
         Write-Error $_
         $failedCount++
-        $failedNames = $failedNames + $pipelineName
-        Write-Host "$($pipelineName)...FAILED"
+        $failedNames = $failedNames + $name
+        Write-Host "$name...FAILED"
     }
 }
 

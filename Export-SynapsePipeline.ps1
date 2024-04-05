@@ -127,8 +127,8 @@ if ($PipelineName) {
 $pipelines = $pipelines | Sort-Object -Property Name
 
 $pipelines `
-    | Sort-Object -Property Name
-    | ConvertTo-Json -Depth 100
+    | Sort-Object -Property Name `
+    | ConvertTo-Json -Depth 100 `
     | Out-File -FilePath $Path
 
 Write-Host "$($pipelines.Count) pipelines exported to $Path"
