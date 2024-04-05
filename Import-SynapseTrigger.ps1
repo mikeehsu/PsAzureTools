@@ -1,31 +1,24 @@
 <#
 .SYNOPSIS
-    A script to copy an Azure Synapse Analytics trigger.
+    A script to import Azure Synapse Analytics triggers.
 
 .DESCRIPTION
-    This script is used to copy an Azure Synapse Analytics trigger from a source to a destination.
-
+    This script is used to import Synapse workspace triggers
 
 .PARAMETER ResourceGroupName
-    The name of the resource group of the Synapse workspace where the trigger will be copied to.
+    The name of the Resource Group for the Synapse workspace.
 
-.PARAMETER WorkspaceName
-    The name of the destination Synapse workspace.
-[]
+.PARAMETER WorkspaceName$WorkspaceName
+    The name of the Synapse workspace.
+
+.PARAMETER Path
+    The file to export the triggers to.
+
 .PARAMETER TriggerName
-    The name of the trigger in the destination Synapse workspace. This is only used when copying a single trigger.
-
-.PARAMETER Suffix
-    An optional suffix to append to the name of the copied trigger.
-
-.PARAMETER Overwrite
-    A switch parameter to indicate whether to overwrite the destination trigger if it already exists.
+    The name of the trigger that you want to import. If not specified, all triggers contained in the specfified filewill be imported.
 
 .EXAMPLE
-    .\Copy-SynapseTrigger.ps1 -SourceSubscriptionId <value> -SourceResourceGroupName <value> -WorkspaceNam <value> -TriggerName <value> -DestinationSubscriptionId <value> -DestinationResourceGroupName <value> -WorkspaceName[] <value> -TriggerName <value> -Suffix <value> -Overwrite
-
-    Replace <value> with the appropriate value for each parameter.
-
+    Import-SynapseTrigger.ps1 -ResourceGroupName "mygroup" -WorkspaceName "myworkspace" -Path "triggers.json" -Overwrite
 #>
 
 [CmdletBinding()]

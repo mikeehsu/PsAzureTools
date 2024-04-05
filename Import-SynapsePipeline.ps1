@@ -1,27 +1,33 @@
 <#
 .SYNOPSIS
-    A script to copy an Azure Synapse Analytics pipeline.
+    Import pipelines from a file into an  Azure Synapse Analytics workspace.
 
 .DESCRIPTION
-    This script, Copy-SynapsePipeline.ps1, is used to copy an Azure Synapse Analytics pipeline from a source to a destination.
+    This script is used to import Azure Synapse Analytics pipelines from a JSON file.
 
 .PARAMETER ResourceGroupName
-    The name of the resource group in the destination Azure account where the Synapse pipeline will be copied to.
+    Specifies the name of the resource group where the workspace is located.
 
 .PARAMETER WorkspaceName
-    The name of the destination Synapse workspace.
+    Specifies the name of the Synapse workspace where the pipelines will be imported.
+
+.PARAMETER Path
+    Specifies the path to the JSON file containing the pipeline definitions to be imported.
 
 .PARAMETER PipelineName
-    The name of the pipeline in the destination Synapse workspace. Only used when copying a single pipeline.
+    Specifies the name of the specific pipeline to import. If not specified, all pipelines in the JSON file will be copied.
 
 .PARAMETER Suffix
-    An optional suffix to append to the name of the copied pipeline.
+    Specifies an optional suffix to append to the name of the copied pipelines.
 
 .PARAMETER Overwrite
-    A switch parameter to indicate whether to overwrite the destination pipeline if it already exists.
+    Switch parameter to indicate whether existing pipelines in the destination workspace should be overwritten if they have the same name as the pipelines being copied.
 
+.EXAMPLE
+    .\Import-SynapsePipeline.ps1 -ResourceGroupName "MyResourceGroup" -WorkspaceName "MyWorkspace" -Path "C:\Pipelines.json" -Overwrite
+
+    Copies all pipelines defined in the "Pipelines.json" file to the "MyWorkspace" Synapse workspace in the "MyResourceGroup" resource group, overwriting existing pipelines with the same names.
 #>
-
 
 [CmdletBinding()]
 param (

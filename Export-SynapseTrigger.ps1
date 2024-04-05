@@ -1,30 +1,34 @@
 <#
 .SYNOPSIS
-    A script to copy an Azure Synapse Analytics trigger.
+Retrieve triggers from an Azure Synapse Analytics workspace.
 
 .DESCRIPTION
-    This script is used to copy an Azure Synapse Analytics trigger from a source to a destination.
+This script retrieves triggers from an Azure Synapse Analytics workspace and writes them to a specified file in JSON format.
 
-.PARAMETER Re$ResourceGroupName
-    The name of the resource group in the source Azure account where the Synapse trigger is located.
+.PARAMETER ResourceGroupName
+The name of the resource group where the Synapse workspace is located.
 
-.PARAMETER WorkspaceName$WorkspaceName
-    The name of the source Synapse workspace.
+.PARAMETER WorkspaceName
+The name of the Azure Synapse Analytics workspace.
 
 .PARAMETER Path
-    The file to export the triggers to.
-[]
+The path where the JSON file containing the triggers will be saved.
+
 .PARAMETER TriggerName
-    The name of the trigger in the source Synapse workspace. If not specified, all triggers will be copied.
-
-
-
+Optional. The name of the specific trigger to retrieve.
 
 .EXAMPLE
-    .\Copy-SynapseTrigger.ps1 -SourceSubscriptionId <value> -SourceResourceGroupName <value> -SourceWorkspaceName[] <value> -TriggerName <value> -DestinationSubscriptionId <value> -DestinationResourceGroupName <value> -DestinationWorkspaceName <value> -DestinationTriggerName <value> -Suffix <value> -Overwrite
+Export-SynapseTriggers -ResourceGroupName "myResourceGroup" -WorkspaceName "myWorkspace" -Path "C:\output\triggers.json"
 
-    Replace <value> with the appropriate value for each parameter.
+This example retrieves all triggers from the specified Azure Synapse Analytics workspace and saves them to "C:\output\triggers.json".
 
+.EXAMPLE
+Export-SynapseTriggers -ResourceGroupName "myResourceGroup" -WorkspaceName "myWorkspace" -Path "C:\output\triggers.json" -TriggerName "myTriggerName"
+
+This example retrieves a specific trigger named "myTriggerName" from the specified Azure Synapse Analytics workspace and saves it to "C:\output\triggers.json".
+
+.NOTES
+File output will be in JSON format.
 #>
 
 [CmdletBinding()]
