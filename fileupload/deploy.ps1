@@ -95,8 +95,11 @@ try {
     }
 
     $sasToken = $docsContainer | New-AzStorageContainerSASToken -Permission cw -ExpiryTime (Get-Date).AddYears(1)
+    if (-not $sasToken.StartsWith('?')) {
+        # necessary for breaking change introduced with Az.Storage v6.0+
+        $sasToken = "?" + $sasToken
+    }
 
-    $storageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName
     Write-Host "$StorageAccountName configuration complete. To upload, use this URL: $($storageAccount.PrimaryEndpoints.Web)$sasToken"
 
 } catch {
