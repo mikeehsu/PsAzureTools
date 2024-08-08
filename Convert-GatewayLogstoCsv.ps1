@@ -37,6 +37,7 @@ class GatewayLog {
     [string] $localIp
     [string] $localPort
     [string] $message
+    [string] $maskedMessage
 }
 
 # confirm user is logged into subscription
@@ -88,6 +89,9 @@ foreach ($blob in $blobs) {
         else {
             $parseData.message = [regex]::Match($rawData.properties.message, 'SESSION_ID :{[0-9a-fA-F-]+}\s*(.*)').Groups[1].Value
         }
+
+        $parseData.maskedMessage = $parseData.message -replace '0x[0-9A-Fa-f]+', '####'
+        $parseData.maskedMessage = $parseData.maskedMessage -replace "\d{8,}", "####"
 
         $outputData += $parseData
     }
