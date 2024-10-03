@@ -59,7 +59,7 @@ PROCESS {
         return
     }
 
-    $result.Content | ConvertFrom-Json
+    ($result.Content | ConvertFrom-Json).value
 }
 
 END {
