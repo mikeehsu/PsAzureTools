@@ -8,6 +8,9 @@ Service provider to retrieve metrics for
 .PARAMETER Location
 Location retrieve metrics for
 
+.PARAMETER ApiVersion
+Api Version to use
+
 .EXAMPLE
 Get-QuotaUsage.ps1 -Provider "Microsoft.Compute" -Location "West US"
 
@@ -19,13 +22,16 @@ Get-QuotaUsage.ps1 -Provider "Microsoft.Compute" -Location "West US"
 [CmdletBinding()]
 param (
     [Parameter(Mandatory)]
-    [string] $Provider,
+    [string] $ProviderNamespace,
 
     [Parameter(Mandatory)]
     [string] $Location,
 
     [Parameter()]
-    [string] $ApiVersion = '2024-07-01'
+    [string] $ApiVersion,
+
+    [Parameter()]
+    [Microsoft.Azure.Commands.Common.Authentication.Abstractions.Core.IAzureContextContainer] $DefaultProfile
 )
 
 BEGIN {
@@ -47,8 +53,31 @@ BEGIN {
 PROCESS {
 
     try {
-        $url = $managementUrl.TrimEnd('/') +  "/subscriptions/$subscriptionId/providers/$Provider/locations/$Location/usages?api-version=$ApiVersion"
-        $result = Invoke-AzRestMethod -Uri $url
+        if (-not $ApiVersion) {
+            $provider = Get-AzResourceProvider -ProviderNamespace $ProviderNamespace -location $Location | Where-Object {$_.ResourceTypes.ResourceTypeName -contains 'locations/usages' }
+            if (-not $provider) {
+                Write-Error "Provider '$ProviderNamespace/locations/usages' does not exist for $Location."
+                return
+            }
+            $ApiVersion = $provider.resourcetypes.ApiVersions | Sort-Object -Descending | Select-Object -First 1
+            if (-not $ApiVersion) {
+                Write-Error "No API version found for $Provider."
+                return
+            }
+        }
+
+        $url = $managementUrl.TrimEnd('/') +  "/subscriptions/$subscriptionId/providers/$ProviderNamespace/locations/$Location/usages?api-version=$ApiVersion"
+        $params = @{
+            Uri = $url
+            Method = 'GET'
+        }
+
+        if ($DefaultProfile) {
+            $params.Add('DefaultProfile', $DefaultProfile)
+        }
+
+        $result = Invoke-AzRestMethod @params
+
     } catch [Exception] {
         Write-Error $_.Exception.Message
         return
@@ -65,3 +94,4 @@ PROCESS {
 END {
 
 }
+
