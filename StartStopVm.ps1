@@ -85,7 +85,7 @@ $startTime = Get-Date
 try {
     $result = Get-AzContext -ErrorAction Stop
     if (-not $result.Environment) {
-        throw"Please login (Login-AzureRmAccount) and set the proper subscription context before proceeding."
+        throw"Please login (Connect-AzAccount) and set the proper subscription context before proceeding."
     }
 
 }
