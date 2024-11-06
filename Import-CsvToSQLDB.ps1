@@ -1,60 +1,61 @@
-##############################
-#.SYNOPSIS
-# Load CSV file into a SQL database table.
-#
-#.DESCRIPTION
-# This script is optimized to load a large delimited file into a
-# SQL database. A mapping file provides the capability of mapping
-# fields in the file to specific columns in the table. Additionally,
-# the configuration allows text fields with JSON elements to be
-# mapped to individual columns. (This script requires the SQLServer
-# Powershell module)
-#
-#.PARAMETER FilePath
-# This parameter specifies the path of the file to process.
-#
-#.PARAMETER ConfigFilePath
-# This parameter specifies the path of the config file for
-# mapping csv fields to table columns
-#
-#.PARAMETER DbServer
-# This parameter specifies the SQL server to connect to
-#
-#.PARAMETER Database
-# This parameter specifies the database to write the data to
-#
-#.PARAMETER Table
-# This parameter specifies the table to write the data to
-#
-#.PARAMETER UserId
-# This parameter specifies the userid for the database login
-#
-#.PARAMETER Password
-# This parameter specifies the password for the database login
-#
-#.PARAMETER Delimiter
-# This parameter specifies the delimiter to use when parsing the
-# file specified in the -FilePath parameter
-#
-#.PARAMETER Skip
-# This parameter specifies how many rows at the top to the
-# file to skip. This should NOT include the header row that
-# describes the columns.
-#
-#.PARAMETER BatchSize
-# This parameter specifies how many rows to process before
-# writing the results to the database.
-#
-#.PARAMETER StartOnDataRow
-# This parameter specifies which data row to start loading on,
-# skipping unnecessary data rows immediately after the header.
-#
-#.EXAMPLE
-# Import-CsvToSqlDb.ps1 -FilePath SampleCsv.csv -ConfigFilePath .\Sample\SampleImportCsvToDBForBilling.json
-#
-#.NOTES
-#
-##############################
+<#
+.SYNOPSIS
+Load CSV file into a SQL database table.
+
+.DESCRIPTION
+This script is optimized to load a large delimited file into a
+SQL database. A mapping file provides the capability of mapping
+fields in the file to specific columns in the table. Additionally,
+the configuration allows text fields with JSON elements to be
+mapped to individual columns. (This script requires the SQLServer
+Powershell module)
+
+.PARAMETER FilePath
+This parameter specifies the path of the file to process.
+
+.PARAMETER ConfigFilePath
+This parameter specifies the path of the config file for
+mapping csv fields to table columns
+
+.PARAMETER DbServer
+This parameter specifies the SQL server to connect to
+
+.PARAMETER Database
+This parameter specifies the database to write the data to
+
+.PARAMETER Table
+This parameter specifies the table to write the data to
+
+.PARAMETER UserId
+This parameter specifies the userid for the database login
+
+.PARAMETER Password
+This parameter specifies the password for the database login
+
+.PARAMETER Delimiter
+This parameter specifies the delimiter to use when parsing the
+file specified in the -FilePath parameter
+
+.PARAMETER Skip
+This parameter specifies how many rows at the top to the
+file to skip. This should NOT include the header row that
+describes the columns.
+
+.PARAMETER BatchSize
+This parameter specifies how many rows to process before
+writing the results to the database.
+
+.PARAMETER StartOnDataRow
+This parameter specifies which data row to start loading on,
+skipping unnecessary data rows immediately after the header.
+
+.EXAMPLE
+Import-CsvToSqlDb.ps1 -FilePath SampleCsv.csv -ConfigFilePath .\Sample\SampleImportCsvToDBForBilling.json
+
+.NOTES
+#>
+
+[CmdletBinding()]
 
 Param (
     [Parameter(Mandatory)]
@@ -104,7 +105,7 @@ function MappingUpdateColumn {
 
     # find all matching dbColumns
     $matchedColumns = (0..($mapping.Count-1)) | Where-Object {$mapping[$_].dbColumn -eq $DbColumn}
-    if ($matchedColumns.Count -eq 0) {
+    if (-not $matchedColumns -or $matchedColumns.Count -eq 0) {
         Write-Error "Unable to find table column: $DbColumn" -ErrorAction Stop
         return
 
@@ -175,32 +176,46 @@ $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
 #endregion
 
 #region -- Load mapping file
+$map = [PSCustomObject] @{}
 if ($ConfigFilePath) {
     $map = Get-Content $ConfigFilePath | ConvertFrom-Json
 
-    if ($map.DbServer -and -not $DbServer) {
+    if ($map.PSObject.Properties.Match('DbServer').count -and -not $DbServer) {
         $DbServer = $map.DbServer
     }
 
-    if ($map.Database -and -not $Database) {
+    if ($map.PSObject.Properties.Match('Database').count -and -not $Database) {
         $Database = $map.Database
     }
 
-    if ($map.Table -and -not $Table) {
+    if ($map.PSObject.Properties.Match('Table').count -and -not $Table) {
         $Table = $map.Table
     }
 
-    if ($map.Delimiter -and -not $Delimiter) {
+    if ($map.PSObject.Properties.Match('Delimiter').count -and -not $Delimiter) {
         $Delimiter = $map.Delimiter
     }
 
-    if ($map.Skip -and -not $Skip) {
+    if ($map.PSObject.Properties.Match('Skip').count -and -not $Skip) {
         $Skip = $map.Skip
     }
 
-    if ($map.BatchSize -and -not $BatchSize) {
+    if ($map.PSObject.Properties.Match('BatchSize').count -and -not $BatchSize) {
         $BatchSize = $map.BatchSize
     }
+}
+
+$emptyObject = [PSCustomObject] @{}
+if (-not $map.PSObject.Properties.Match('ColumnMappings').count) {
+    $map | Add-Member -NotePropertyName 'ColumnMappings' -NotePropertyValue $emptyObject
+}
+
+if (-not $map.PSObject.Properties.Match('Constants').count) {
+    $map | Add-Member -NotePropertyName 'Constants' -NotePropertyValue $emptyObject
+}
+
+if (-not $map.PSObject.Properties.Match('Transformations').count) {
+    $map | Add-Member -NotePropertyName 'Transformations' -NotePropertyValue $emptyObject
 }
 
 # check required parameters
@@ -346,6 +361,7 @@ foreach ($constant in $map.Constants.PSObject.Properties) {
     $constantExpression += "`$tableRow[$($match.dbColumnNum)] = '" + $constant.value + "'"
 }
 
+
 # build transformation assignments
 $transformationExpression = ''
 foreach ($transformation in $map.Transformations.PsObject.Properties) {
@@ -370,6 +386,7 @@ foreach ($transformation in $map.Transformations.PsObject.Properties) {
 
     $transformationExpression += "`$tableRow[$($match.dbColumnNum)] = `$(" + $statement + ")"
 }
+
 
 # debug output
 Write-Verbose "Constants: $constantExpression"
@@ -408,7 +425,7 @@ Write-Verbose "Inserting data to table..."
 
 # initialize constant values in tableRow
 if ($constantExpression) {
-    Invoke-Expression $constantExpression
+    Invoke-Expression $constantExpression!c3B!llingPwd20241022
 }
 
 $added = 0
