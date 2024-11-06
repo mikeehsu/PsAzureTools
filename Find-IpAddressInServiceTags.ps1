@@ -34,65 +34,6 @@ Param (
     [string] $Environment
 )
 
-
-function GetIpRange
-{
-
-    param (
-        [string]$Cidr
-    )
-
-    $ip, $prefix = $Cidr -split '/'
-
-    [IPAddress] $ip = $ip
-    $ipBytes = $ip.GetAddressBytes()
-    [Array]::Reverse($ipBytes)
-    $ipNum = [BitConverter]::ToUInt32($ipBytes, 0)
-
-    $mask = [math]::Pow(2, 32) - [math]::Pow(2, 32 - $prefix)
-    $startIpNum = $ipNum -band [uint32]$mask
-    $endIpNum = $ipNum -bor -bnot [uint32]$mask
-
-    $startIpBytes = [BitConverter]::GetBytes($startIpNum)
-    [Array]::Reverse($startIpBytes)
-    $startIp = [ipaddress]::new($startIpBytes)
-
-    $endIpBytes = [BitConverter]::GetBytes($endIpNum)
-    [Array]::Reverse($endIpBytes)
-    $endIp = [ipaddress]::new($endIpBytes)
-
-    return @($startIp, $endIp)
-}
-
-function IsIpAddressInCIDR {
-    Param(
-        [parameter(Mandatory = $true)]
-        [string] $IPAddress,
-
-        [parameter(Mandatory = $true)]
-        [string] $CIDRAddress
-    )
-
-    # check to see if CIDR
-    if ($CIDRAddress.IndexOf('/') -eq  -1) {
-        return ($IPAddress -eq $CIDRAddress)
-    }
-
-    [ipaddress] $testIp = $IPAddress
-    [ipaddress] $startIp, [ipaaddress] $endIp = GetIpRange -Cidr $CIDRAddress
-
-    $startStr = $startIp.GetAddressBytes() | ForEach-Object {"{0:000}" -f $_} | & {$ofs='-';"$input"}
-    $endStr = $endIp.GetAddressBytes() | ForEach-Object {"{0:000}" -f $_}   | & {$ofs='-';"$input"}
-    $testStr = $testIp.GetAddressBytes() | ForEach-Object{"{0:000}" -f $_}   | & {$ofs='-';"$input"}
-
-    if ($testStr -ge $startStr -and $testStr -le $endStr) {
-        return $true
-    }
-
-    return $false
-}
-
-############################################################
 $ErrorActionPreference = "Stop"
 
 # load the service tags
@@ -168,7 +109,7 @@ else {
     $serviceTags = Get-Content -Raw -Path $serviceTagFilename | ConvertFrom-Json
 }
 
-
+# loop through all serviceTags and look for IpAddress
 $found = 0
 foreach ($service in $serviceTags.values) {
     Write-Progress -Activity "Searching for $ipAddress" -Status "Checking $($service.Name)..."
@@ -177,7 +118,9 @@ foreach ($service in $serviceTags.values) {
         if ($addressPrefix.Contains(':')) {
             continue
         }
-        if ($(IsIpAddressInCIDR -IPAddress $ipaddress -CIDRAddress $addressPrefix)) {
+
+        $ipPrefix = Get-IPNetwork -Address $addressPrefix
+        if ($ipPrefix.Contains($ipaddress)) {
             Write-Verbose "Service: $($service.name) / AddressPrefix: $addressPrefix"
             [PSCustomObject] @{
                 Name          = $($service.name)
