@@ -29,6 +29,10 @@ param (
     [string] $Location
 )
 
+#Requires -module Az.Accounts
+#Requires -module Az.Resources
+#Requires -module Az.Storage
+
 # check session to make sure if it connected
 try {
     $context = Get-AzContext -ErrorAction Stop
@@ -46,7 +50,7 @@ catch {
 $storageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName -ErrorAction SilentlyContinue
 if (-not $storageAccount) {
     if (-not $Location) {
-        Write-Error "Storage Account ($storageAccountName) not found. Please provide an existing storage account or provide -Location."
+        Write-Error "Storage Account ($storageAccountName) not found. Please provide an existing storage account or provide -Location parameter on the command line."
         return
     }
 
